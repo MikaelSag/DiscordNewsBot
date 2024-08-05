@@ -1,0 +1,16 @@
+- better inform the user on the player currently being moved without clogging the screen DONE
+- change names and descriptions DONE
+- check spelling in starting draftboard DONE
+- import standard template for draftboard DONE
+- have user sort draftboard by round rather than all at once? DONE
+- add view command DONE
+- store users draftboards in a database DONE
+- add edit existing command DONE
+- add reset/delete current draftboard DONE
+- load existing needs to only load for matching discord id DONE
+- modals need to allow up to 150 DONE
+- change view_draftboard name DONE
+- reformat date time DONE
+- add weekly top players and injuries/news?
+- start/sit command?
+
