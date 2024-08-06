@@ -11,6 +11,11 @@
 - modals need to allow up to 150 DONE
 - change view_draftboard name DONE
 - reformat date time DONE
-- add weekly top players and injuries/news?
-- start/sit command?
+- add weekly top players?
+- injuries/news?
+- start/sit command (use betting odds rather than projected points)?
+- optimal lineup for a given week?
+- waiver wire report?
+- fantasy stats from last season
+- TRADE ANALYZER
 
