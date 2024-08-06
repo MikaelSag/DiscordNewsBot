@@ -454,22 +454,41 @@ async def manage_draftboard(interaction: discord.Interaction):
 @app_commands.describe(player="Enter the player who's stats you'd like to view")
 async def last_season_stats(interaction: discord.Interaction, player: str):
     with sqlite3.connect("draft_board.db") as storage:
-        query = 'SELECT points_per_game, ranking, games_played FROM last_year_stats where player=?'
+        cursor = storage.cursor()
+        query = 'SELECT points_per_game, ranking, games_played FROM last_year_stats WHERE player=?'
         cursor.execute(query, (player,))
         player_info = cursor.fetchall()
 
     if not player_info:
-       await interaction.response.send_message('There are no recorded stats for ' + player + " check your spelling.", ephemeral=True)
+        await interaction.response.send_message(f'There are no recorded stats for {player}. Check your spelling.', ephemeral=True)
     else:
         ppg, rank, games_played = player_info[0]
 
-        stats_embed = discord.Embed(title=player + "'s 2023-24 Stats", color=0x00ffd5)
-        # stats_embed.add_field(name='Player', value=player, inline=True)
+        stats_embed = discord.Embed(title=f"{player}'s 2023-24 Stats", color=0x00ffd5)
         stats_embed.add_field(name='Rank', value=rank, inline=False)
         stats_embed.add_field(name='Fantasy Points per Game', value=ppg, inline=False)
         stats_embed.add_field(name='Games Played', value=games_played, inline=False)
 
         await interaction.response.send_message(embed=stats_embed, ephemeral=True)
+
+# adds autocomplete functionality to the player field for the last_season_stats slash command
+@last_season_stats.autocomplete('player')
+async def player_autocomplete(interaction: discord.Interaction, current: str) -> list[discord.app_commands.Choice[str]]:
+    storage = sqlite3.connect('draft_board.db')
+    cursor = storage.cursor()
+    parts = current.split()
+    if len(parts) == 1:
+        query = "SELECT player FROM last_year_stats WHERE player LIKE ? OR player LIKE ? LIMIT 25"
+        cursor.execute(query, (f'{parts[0]}%', f'% {parts[0]}%'))
+    elif len(parts) > 1:
+        query = "SELECT player FROM last_year_stats WHERE player LIKE ? LIMIT 25"
+        cursor.execute(query, (f'{parts[0]}% {parts[1]}%',))
+
+    results = cursor.fetchall()
+    storage.close()
+
+    choices = [discord.app_commands.Choice(name=player[0], value=player[0]) for player in results]
+    return choices
 
 # closes the connection when the bot shuts down
 @bot.event
