@@ -1,8 +1,11 @@
 import os
 import discord
 import sqlite3
+import requests
 from discord.ext import commands
+from discord import app_commands
 from discord.ui import View, Select, Button, Modal, TextInput
+from bs4 import BeautifulSoup
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -43,19 +46,14 @@ storage.commit()
 
 # read starting draft board
 async def load_starting():
+    global players
     starting_storage = sqlite3.connect('starting_draftboard.db')
     cursor = starting_storage.cursor()
     query = "SELECT player FROM players"
     cursor.execute(query)
-    starting_players = cursor.fetchall()
+    players = cursor.fetchall()
     starting_storage.close()
-    return starting_players
-
-async def get_starting():
-    starting_players = await load_starting()
-    return starting_players
-
-players = get_starting()
+    return players
 
 # load existing draftboard
 async def load_existing(discord_id):
@@ -77,6 +75,7 @@ async def check_exists(discord_id):
 # on bot startup connect to guild and print confirmation
 @bot.event
 async def on_ready():
+    await load_starting()
     for guild in bot.guilds:
         if guild.id == GUILD_ID:
             break
@@ -423,7 +422,7 @@ async def create_draftboard(interaction: discord.Interaction):
     user_id = interaction.user.id
     check = await check_exists(user_id)
     if not check:
-        initial_players = await get_starting()
+        initial_players = await load_starting()
         view = DraftBoardViewWithSelect(initial_players[:])
         await interaction.response.send_message(
             content="Current Draft Board:\n" + "\n".join(f"{i + 1}. {player[0]}" for i, player in enumerate(initial_players[:12])), view=view
@@ -449,6 +448,28 @@ async def manage_draftboard(interaction: discord.Interaction):
         await interaction.response.send_message(
             content="You do not have a draft board saved under this account. Try /create_draftboard", ephemeral=True
         )
+
+# retrieves player's stats from last season from the database and displays them for a player chosen by the user
+@bot.tree.command(name='last_season_stats', description="View a player's fantasy football stats from the 2023-24 season")
+@app_commands.describe(player="Enter the player who's stats you'd like to view")
+async def last_season_stats(interaction: discord.Interaction, player: str):
+    with sqlite3.connect("draft_board.db") as storage:
+        query = 'SELECT points_per_game, ranking, games_played FROM last_year_stats where player=?'
+        cursor.execute(query, (player,))
+        player_info = cursor.fetchall()
+
+    if not player_info:
+       await interaction.response.send_message('There are no recorded stats for ' + player + " check your spelling.", ephemeral=True)
+    else:
+        ppg, rank, games_played = player_info[0]
+
+        stats_embed = discord.Embed(title=player + "'s 2023-24 Stats", color=0x00ffd5)
+        # stats_embed.add_field(name='Player', value=player, inline=True)
+        stats_embed.add_field(name='Rank', value=rank, inline=False)
+        stats_embed.add_field(name='Fantasy Points per Game', value=ppg, inline=False)
+        stats_embed.add_field(name='Games Played', value=games_played, inline=False)
+
+        await interaction.response.send_message(embed=stats_embed, ephemeral=True)
 
 # closes the connection when the bot shuts down
 @bot.event
