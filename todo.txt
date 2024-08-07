@@ -11,6 +11,21 @@
 - modals need to allow up to 150 DONE
 - change view_draftboard name DONE
 - reformat date time DONE
+- add rookies to player database DONE
+- fix schedule
+- speed up database search, fix timeout:
+[2024-08-07 12:00:39] [ERROR   ] discord.app_commands.tree: Ignoring exception in autocomplete for 'start_or_sit'
+Traceback (most recent call last):
+line 1302, in _call
+    await command._invoke_autocomplete(interaction, focused, namespace)
+line 927, in _invoke_autocomplete
+    await interaction.response.autocomplete(choices)
+line 1093, in autocomplete
+    await adapter.create_interaction_response(
+line 221, in request
+    raise NotFound(response, data)
+discord.errors.NotFound: 404 Not Found (error code: 10062): Unknown interaction
+
 - fantasy stats from last season DONE
 - add weekly top players?
 - injuries/news?

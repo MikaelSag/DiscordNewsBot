@@ -449,9 +449,27 @@ async def manage_draftboard(interaction: discord.Interaction):
             content="You do not have a draft board saved under this account. Try /create_draftboard", ephemeral=True
         )
 
+# autocomplete function for players' names
+async def player_autocomplete(interaction: discord.Interaction, current: str) -> list[discord.app_commands.Choice[str]]:
+    storage = sqlite3.connect('draft_board.db')
+    cursor = storage.cursor()
+    parts = current.split()
+    if len(parts) == 1:
+        query = "SELECT player FROM last_year_stats WHERE player LIKE ? OR player LIKE ? LIMIT 25"
+        cursor.execute(query, (f'{parts[0]}%', f'% {parts[0]}%'))
+    elif len(parts) > 1:
+        query = "SELECT player FROM last_year_stats WHERE player LIKE ? LIMIT 25"
+        cursor.execute(query, (f'{parts[0]}% {parts[1]}%',))
+
+    results = cursor.fetchall()
+    storage.close()
+
+    choices = [discord.app_commands.Choice(name=player[0], value=player[0]) for player in results]
+    return choices
+
 # retrieves player's stats from last season from the database and displays them for a player chosen by the user
 @bot.tree.command(name='last_season_stats', description="View a player's fantasy football stats from the 2023-24 season")
-@app_commands.describe(player="Enter the player who's stats you'd like to view")
+@app_commands.describe(player="Enter the player whose stats you'd like to view")
 async def last_season_stats(interaction: discord.Interaction, player: str):
     with sqlite3.connect("draft_board.db") as storage:
         cursor = storage.cursor()
@@ -471,23 +489,170 @@ async def last_season_stats(interaction: discord.Interaction, player: str):
 
         await interaction.response.send_message(embed=stats_embed, ephemeral=True)
 
-# adds autocomplete functionality to the player field for the last_season_stats slash command
+# adds autocompletion for last_season_stats 'player' field
 @last_season_stats.autocomplete('player')
-async def player_autocomplete(interaction: discord.Interaction, current: str) -> list[discord.app_commands.Choice[str]]:
-    storage = sqlite3.connect('draft_board.db')
-    cursor = storage.cursor()
-    parts = current.split()
-    if len(parts) == 1:
-        query = "SELECT player FROM last_year_stats WHERE player LIKE ? OR player LIKE ? LIMIT 25"
-        cursor.execute(query, (f'{parts[0]}%', f'% {parts[0]}%'))
-    elif len(parts) > 1:
-        query = "SELECT player FROM last_year_stats WHERE player LIKE ? LIMIT 25"
-        cursor.execute(query, (f'{parts[0]}% {parts[1]}%',))
+async def last_season_stats_player_autocomplete(interaction: discord.Interaction, current: str) -> list[discord.app_commands.Choice[str]]:
+    return await player_autocomplete(interaction, current)
 
-    results = cursor.fetchall()
-    storage.close()
+# user can compare two players projected fantasy football stats for a given week
+@bot.tree.command(name='start_or_sit', description='Compare two players projected fantasy performance for a given week')
+@app_commands.describe(player1="Enter the first player you'd like to compare")
+@app_commands.describe(player2="Enter the second player you'd like to compare")
+@app_commands.describe(week="Enter the week you'd like to compare stats in")
+async def start_or_sit(interaction: discord.Interaction, player1: str, player2: str, week: str):
+    await interaction.response.send_message("Gathering information, please wait...", ephemeral=True)
+    initial_message = await interaction.original_response()
+    # get ranking (just need position) from database of players
+    with sqlite3.connect('draft_board.db') as storage:
+        cursor = storage.cursor()
+        query = "SELECT ranking FROM last_year_stats WHERE player=?"
+        cursor.execute(query, (player1,))
+        pos1 = cursor.fetchall()
+        cursor.execute(query, (player2,))
+        pos2 = cursor.fetchall()
 
-    choices = [discord.app_commands.Choice(name=player[0], value=player[0]) for player in results]
+    # format position ranking to be position ex: QB1 -> qb
+    if pos1:
+        position1 = pos1[0][0][:2].lower()
+    elif not pos2:
+        await interaction.followup.edit_message(initial_message.id, content=f"We couldn't find {player1} or {player2} in our database. Try selecting a player from the drop down menu.")
+        return
+    else:
+        await interaction.followup.edit_message(initial_message.id, content=f"We couldn't find {player1} in our database. Try selecting a player from the drop down menu.")
+        return
+    if pos2:
+        position2 = pos2[0][0][:2].lower()
+    else:
+        await interaction.followup.edit_message(initial_message.id, content=f"We couldn't find {player2} in our database. Try selecting a player from the drop down menu.")
+        return
+
+    if int(week) > 17 or int(week) < 1:
+        await interaction.followup.edit_message(initial_message.id, content=f"Please enter a week from 1-17. You entered: {week}")
+        return
+    else:
+        # get consensus player projections for user chosen players and week
+        url1 = requests.get(f"https://www.fantasypros.com/nfl/projections/{position1}.php?week={week}&scoring=PPR")
+        url2 = requests.get(f"https://www.fantasypros.com/nfl/projections/{position2}.php?week={week}&scoring=PPR")
+        doc1 = BeautifulSoup(url1.text, "html.parser")
+        doc2 = BeautifulSoup(url2.text, "html.parser")
+        player1_info = doc1.findAll("td")
+        player2_info = doc2.findAll("td")
+
+        # formatting for data scrape
+        pos1_offset = 0
+        if position1 == "qb":
+            pos1_offset = 10
+        elif position1 == "wr":
+            pos1_offset = 8
+        elif position1 == "rb":
+            pos1_offset = 8
+        elif position1 == "te":
+            pos1_offset = 5
+
+        found1 = False
+        team1 = ''
+        projection1 = ''
+
+        for i in range(len(player1_info)):
+            if found1:
+                break
+            if player1 in player1_info[i].text:
+                team1 = player1_info[i].text
+                team1 = team1[-3:].strip()
+                found1 = True
+                projection1 = player1_info[i + pos1_offset].text
+
+        pos2_offset = 0
+        if position2 == "qb":
+            pos2_offset = 10
+        elif position2 == "wr":
+            pos2_offset = 8
+        elif position2 == "rb":
+            pos2_offset = 8
+        elif position2 == "te":
+            pos2_offset = 5
+
+        found2 = False
+        team2 = ''
+        projection2 = ''
+
+        for i in range(len(player2_info)):
+            if found2:
+                break
+            if player2 in player2_info[i].text:
+                team2 = player2_info[i].text
+                team2 = team2[-3:].strip()
+                found2 = True
+                projection2 = player2_info[i + pos2_offset].text
+
+        if not projection1:
+            if not projection1:
+                await interaction.followup.edit_message(initial_message.id, content=f"We couldn't find any projections for {player1} or {player2} :(")
+                return
+            await interaction.followup.edit_message(initial_message.id, content=f"We couldn't find any projections for {player1} :(")
+            return
+        if not projection2:
+            await interaction.followup.edit_message(initial_message.id, content=f"We couldn't find any projections for {player2} :(")
+            return
+
+        # get game information (time, date, home team, away team, week) from database for relevant games
+        with sqlite3.connect("draft_board.db") as schedule_storage:
+            if 'JAC' in team1:
+                team1 = "JAX"
+            if 'JAC' in team2:
+                team2 = "JAX"
+            formatted_week = f"Week {week}"
+            cursor1 = schedule_storage.cursor()
+            query1 = "SELECT * FROM schedule WHERE (home_team = ? OR away_team = ?) AND week=?"
+            cursor1.execute(query1,(team1, team1, formatted_week))
+            info1 = cursor1.fetchall()
+            cursor1.execute(query1,(team2, team2, formatted_week))
+            info2 = cursor1.fetchall()
+
+        if not info1:
+            if not info2:
+                await interaction.followup.edit_message(initial_message.id, content=f"{player1} and {player2} Don't have a scheduled matches this week!")
+                return
+            await interaction.followup.edit_message(initial_message.id, content=f"{player1} Doesn't have a scheduled match this week!")
+            return
+        elif not info2:
+            await interaction.followup.edit_message(initial_message.id, content=f"{player2} Doesn't have a scheduled match this week!")
+            return
+
+        # unpack tuple with game info
+        home1, away1, time1, date1, week1 = info1[0]
+        home2, away2, time2, date2, week2 = info2[0]
+
+        # display information to user in an embed
+        compare_embed = discord.Embed(title=f"{formatted_week} Player Comparison", color=discord.Color.dark_orange())
+        compare_embed.add_field(name=player1, value='', inline=False)
+        compare_embed.add_field(name="Game Info", value=f"{away1} @ {home1} \n{date1} at {time1}", inline=False)
+        compare_embed.add_field(name="Projected Points", value=projection1, inline=False)
+        compare_embed.add_field(name=player2, value='', inline=False)
+        compare_embed.add_field(name="Game Info", value=f"{away2} @ {home2} \n{date2} at {time2}", inline=False)
+        compare_embed.add_field(name="Projected Points", value=projection2, inline=False)
+
+        await interaction.followup.edit_message(initial_message.id, content=None, embed=compare_embed)
+
+# adds autocompletion for the players in the start_or_sit command
+@start_or_sit.autocomplete('player1')
+async def start_or_sit_player1_autocomplete(interaction: discord.Interaction, current: str) -> list[discord.app_commands.Choice[str]]:
+    return await player_autocomplete(interaction, current)
+
+@start_or_sit.autocomplete('player2')
+async def start_or_sit_player2_autocomplete(interaction: discord.Interaction, current: str) -> list[discord.app_commands.Choice[str]]:
+    return await player_autocomplete(interaction, current)
+
+# adds autocompletion for the week in the start_or_sit command
+@start_or_sit.autocomplete('week')
+async def start_or_sit_week_autocomplete(interaction: discord.Interaction, current: str) -> list[discord.app_commands.Choice[str]]:
+    weeks = [f"{i}" for i in range(1, 18)]
+    if current.isdigit():
+        filtered_weeks = [week for week in weeks if current in week]
+    else:
+        filtered_weeks = [week for week in weeks if current.lower() in week.lower()]
+
+    choices = [discord.app_commands.Choice(name=week, value=week) for week in filtered_weeks]
     return choices
 
 # closes the connection when the bot shuts down
