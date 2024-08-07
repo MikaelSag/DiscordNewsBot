@@ -7,10 +7,10 @@ with sqlite3.connect("draft_board.db") as storage:
     cursor = storage.cursor()
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS last_year_stats (
-    player TEXT
-    ranking TEXT
-    points_per_game INTEGER
-    games_played INTEGER
+    player TEXT,
+    ranking TEXT,
+    points_per_game INTEGER,
+    games_played INTEGER,
     )
     ''')
 
