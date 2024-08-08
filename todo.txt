@@ -12,7 +12,7 @@
 - change view_draftboard name DONE
 - reformat date time DONE
 - add rookies to player database DONE
-- fix schedule
+- fix schedule DONE
 - speed up database search, fix timeout:
 [2024-08-07 12:00:39] [ERROR   ] discord.app_commands.tree: Ignoring exception in autocomplete for 'start_or_sit'
 Traceback (most recent call last):
@@ -29,7 +29,7 @@ discord.errors.NotFound: 404 Not Found (error code: 10062): Unknown interaction
 - fantasy stats from last season DONE
 - add weekly top players?
 - injuries/news?
-- start/sit command (use betting odds rather than projected points)?
+- start/sit command (use betting odds rather than projected points)? DONE - used projected points because betting odds change too often and arent published early enough
 - optimal lineup for a given week?
 - waiver wire report?
 - TRADE ANALYZER

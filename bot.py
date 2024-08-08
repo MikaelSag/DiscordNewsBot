@@ -603,7 +603,7 @@ async def start_or_sit(interaction: discord.Interaction, player1: str, player2: 
                 team2 = "JAX"
             formatted_week = f"Week {week}"
             cursor1 = schedule_storage.cursor()
-            query1 = "SELECT * FROM schedule WHERE (home_team = ? OR away_team = ?) AND week=?"
+            query1 = "SELECT * FROM schedules WHERE (home_team = ? OR away_team = ?) AND week=?"
             cursor1.execute(query1,(team1, team1, formatted_week))
             info1 = cursor1.fetchall()
             cursor1.execute(query1,(team2, team2, formatted_week))
@@ -620,11 +620,11 @@ async def start_or_sit(interaction: discord.Interaction, player1: str, player2: 
             return
 
         # unpack tuple with game info
-        home1, away1, time1, date1, week1 = info1[0]
-        home2, away2, time2, date2, week2 = info2[0]
+        home1, away1, time1, date1, week1, trash1 = info1[0]
+        home2, away2, time2, date2, week2, trash2 = info2[0]
 
         # display information to user in an embed
-        compare_embed = discord.Embed(title=f"{formatted_week} Player Comparison", color=discord.Color.dark_orange())
+        compare_embed = discord.Embed(title=f"{formatted_week} Player Comparison", color=discord.Color.orange())
         compare_embed.add_field(name=player1, value='', inline=False)
         compare_embed.add_field(name="Game Info", value=f"{away1} @ {home1} \n{date1} at {time1}", inline=False)
         compare_embed.add_field(name="Projected Points", value=projection1, inline=False)
