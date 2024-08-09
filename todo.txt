@@ -4,7 +4,7 @@
 - import standard template for draftboard DONE
 - have user sort draftboard by round rather than all at once? DONE
 - add view command DONE
-- store users draftboards in a database DONE
+- store users draft boards in a database DONE
 - add edit existing command DONE
 - add reset/delete current draftboard DONE
 - load existing needs to only load for matching discord id DONE
@@ -27,10 +27,8 @@ line 221, in request
 discord.errors.NotFound: 404 Not Found (error code: 10062): Unknown interaction
 
 - fantasy stats from last season DONE
-- add weekly top players?
 - injuries/news?
 - start/sit command (use betting odds rather than projected points)? DONE - used projected points because betting odds change too often and arent published early enough
-- optimal lineup for a given week?
 - waiver wire report?
-- TRADE ANALYZER
+- trade analyzer DONE
 

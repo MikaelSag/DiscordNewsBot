@@ -417,7 +417,7 @@ class DraftBoardViewWithoutSelect(View):
             )
 
 # 'create_draftboard' command to create draft board if user does not have an existing one
-@bot.tree.command(name='create_draftboard', description='Create your Draft Board')
+@bot.tree.command(name='create_draftboard', description="Plan out your custom Draft Board, so you're prepared when draft day comes")
 async def create_draftboard(interaction: discord.Interaction):
     user_id = interaction.user.id
     check = await check_exists(user_id)
@@ -455,10 +455,10 @@ async def player_autocomplete(interaction: discord.Interaction, current: str) ->
     cursor = storage.cursor()
     parts = current.split()
     if len(parts) == 1:
-        query = "SELECT player FROM last_year_stats WHERE player LIKE ? OR player LIKE ? LIMIT 25"
+        query = "SELECT player FROM last_year_stats WHERE player LIKE ? OR player LIKE ? LIMIT 20"
         cursor.execute(query, (f'{parts[0]}%', f'% {parts[0]}%'))
     elif len(parts) > 1:
-        query = "SELECT player FROM last_year_stats WHERE player LIKE ? LIMIT 25"
+        query = "SELECT player FROM last_year_stats WHERE player LIKE ? LIMIT 20"
         cursor.execute(query, (f'{parts[0]}% {parts[1]}%',))
 
     results = cursor.fetchall()
@@ -495,7 +495,7 @@ async def last_season_stats_player_autocomplete(interaction: discord.Interaction
     return await player_autocomplete(interaction, current)
 
 # user can compare two players projected fantasy football stats for a given week
-@bot.tree.command(name='start_or_sit', description='Compare two players projected fantasy performance for a given week')
+@bot.tree.command(name='start_or_sit', description="Compare two players' projected fantasy performance for a given week")
 @app_commands.describe(player1="Enter the first player you'd like to compare")
 @app_commands.describe(player2="Enter the second player you'd like to compare")
 @app_commands.describe(week="Enter the week you'd like to compare stats in")
@@ -654,6 +654,236 @@ async def start_or_sit_week_autocomplete(interaction: discord.Interaction, curre
 
     choices = [discord.app_commands.Choice(name=week, value=week) for week in filtered_weeks]
     return choices
+
+@bot.tree.command(name='trade_analyzer', description="Enter a proposed trade to see if our projections think it's to your benefit or not")
+@app_commands.describe(giving1='Enter a player you are trading away')
+@app_commands.describe(giving2='Enter a player you are trading away')
+@app_commands.describe(giving3='Enter a player you are trading away')
+@app_commands.describe(giving4='Enter a player you are trading away')
+@app_commands.describe(giving5='Enter a player you are trading away')
+@app_commands.describe(receiving1='Enter a player you are trading for')
+@app_commands.describe(receiving2='Enter a player you are trading for')
+@app_commands.describe(receiving3='Enter a player you are trading for')
+@app_commands.describe(receiving4='Enter a player you are trading for')
+@app_commands.describe(receiving5='Enter a player you are trading for')
+async def trade_analyzer(interaction: discord.Interaction, giving1: str = None, giving2: str = None, giving3: str = None, giving4: str = None, giving5: str = None, receiving1: str = None, receiving2: str = None, receiving3: str = None, receiving4: str = None, receiving5: str = None):
+    await interaction.response.send_message("Gathering information, please wait...", ephemeral=True)
+    initial_message = await interaction.original_response()
+
+    # store user input in a list
+    giving_player = []
+    receiving_player = []
+    giving_count = 0
+    receiving_count = 0
+
+    if giving1:
+        giving_count += 1
+        giving_player.append(giving1)
+    if giving2:
+        giving_count += 1
+        giving_player.append(giving2)
+    if giving3:
+        giving_count += 1
+        giving_player.append(giving3)
+    if giving4:
+        giving_count += 1
+        giving_player.append(giving4)
+    if giving5:
+        giving_count += 1
+        giving_player.append(giving5)
+
+    if receiving1:
+        receiving_count += 1
+        receiving_player.append(receiving1)
+    if receiving2:
+        receiving_count += 1
+        receiving_player.append(receiving2)
+    if receiving3:
+        receiving_count += 1
+        receiving_player.append(receiving3)
+    if receiving4:
+        receiving_count += 1
+        receiving_player.append(receiving4)
+    if receiving5:
+        receiving_count += 1
+        receiving_player.append(receiving5)
+
+    if len(giving_player) == 0 or len(receiving_player) == 0:
+        await interaction.followup.edit_message(initial_message.id, content=f"Please enter at least one player that you are trading away (giving) as well as trading for (recieving)")
+        return
+    # get ranking (just need position) from database of players
+    giving_pos = []
+    receiving_pos = []
+
+    for i in range(0, len(giving_player)):
+        with sqlite3.connect('draft_board.db') as storage:
+            cursor = storage.cursor()
+            query = "SELECT ranking FROM last_year_stats WHERE player=?"
+            cursor.execute(query, (giving_player[i],))
+            temp = cursor.fetchall()
+            if temp:
+                temp = temp[0][0][:2]
+                giving_pos.append(temp)
+            else:
+                await interaction.followup.edit_message(initial_message.id, content=f"We couldn't find {giving_player[i]} in our database. Try selecting a player from the drop down menu.")
+                return
+
+    for i in range(0, len(receiving_player)):
+        with sqlite3.connect('draft_board.db') as storage:
+            cursor = storage.cursor()
+            query = "SELECT ranking FROM last_year_stats WHERE player=?"
+            cursor.execute(query, (receiving_player[i],))
+            temp = cursor.fetchall()
+            if temp:
+                temp = temp[0][0][:2]
+                receiving_pos.append(temp)
+            else:
+                await interaction.followup.edit_message(initial_message.id, content=f"We couldn't find {receiving_player[i]} in our database. Try selecting a player from the drop down menu.")
+                return
+
+    giving_score = []
+    receiving_score = []
+
+    for i in range(0, len(giving_player)):
+        giving_score.append(await calculate_trade_value(giving_player[i], giving_pos[i]))
+        if giving_score[i] == -1:
+            await interaction.followup.edit_message(initial_message.id, content=f"Unfortunately we couldn't find {giving_player[i]} in our database.")
+            return
+
+    for i in range(0, len(receiving_player)):
+        receiving_score.append(await calculate_trade_value(receiving_player[i], receiving_pos[i]))
+        if receiving_score[i] == -1:
+            await interaction.followup.edit_message(initial_message.id, content=f"Unfortunately we couldn't find {receiving_player[i]} in our database.")
+            return
+
+    giving_score_string = ''
+    receiving_score_string = ''
+    giving_player_string = ''
+    receiving_player_string = ''
+    giving_sum = 0.0
+    receiving_sum = 0.0
+
+    for i in range(0, len(giving_score)):
+        giving_sum += giving_score[i]
+        giving_player_string += giving_player[i] + '\n'
+        giving_score_string += str(round(giving_score[i], 2)) + '\n'
+
+    for i in range(0, len(receiving_score)):
+        receiving_sum += receiving_score[i]
+        receiving_player_string += receiving_player[i] + '\n'
+        receiving_score_string += str(round(receiving_score[i], 2)) + '\n'
+
+        difference = giving_sum - receiving_sum
+        outcome = ''
+
+        if difference > 4:
+            if difference < 12:
+                outcome = "It's close, but the trade doesn't favor your team"
+            else:
+                outcome = "Based on our projections, you shouldn't make this trade"
+        elif difference < -4:
+            if difference > -12:
+                outcome = "The trade favors your team, but not by a lot"
+            else:
+                outcome = "Great trade, we think you should do it"
+        else:
+            outcome = "This one's a toss up, go with team needs"
+
+        # display information to user in an embed
+        trade_embed = discord.Embed(title=outcome, color=discord.Color.brand_red())
+        trade_embed.add_field(name="Trading Away", value=giving_player_string, inline=True)
+        trade_embed.add_field(name=f"{giving_sum:.2f}", value=giving_score_string, inline=True)
+        trade_embed.add_field(name="\u200b", value="\u200b", inline=False)
+        trade_embed.add_field(name="Trading For", value=receiving_player_string, inline=True)
+        trade_embed.add_field(name=f"{receiving_sum:.2f}", value=receiving_score_string, inline=True)
+
+
+        await interaction.followup.edit_message(initial_message.id, content=None, embed=trade_embed)
+
+async def calculate_trade_value(player1, position):
+    url = requests.get("https://www.numberfire.com/nfl/fantasy/remaining-projections")
+    doc = BeautifulSoup(url.text, "html.parser")
+    player_name = doc.findAll("span", attrs="full")
+    positions = doc.findAll("td", attrs="player")
+    fpts = doc.findAll("td", attrs="nf_fp active")
+    receptions = doc.findAll("td", attrs='rec')
+
+    proj = ''
+    recs = ''
+    i = 0
+    j = 1
+    posCount = 0
+    posSum = 0.0
+    posRank = 0
+    posRange = 12
+    if position == 'WR' or position == 'RB':
+        posRange = 24
+
+    # hotfix for issue inconsistency in database
+    if player1 == 'Michael Pittman':
+        player1 = 'Michael Pittman Jr.'
+
+    for player in player_name:
+        if player1 in player:
+            recs = receptions[i].text.strip()
+            proj = fpts[i].text.strip()
+            posRank = j
+        if position in positions[i].text:
+            if posCount < posRange:
+                posSum += (float(fpts[i].text.strip())) + (float(receptions[i].text.strip()))
+                posCount += 1
+            j += 1
+        i += 1
+    if proj == '':
+        return -1
+
+    if recs == '':
+        return -1
+
+    proj = (float(proj) + float(recs))
+    posAvg = posSum / posRange
+    offset = 0
+
+    # top 3 qbs and tes, top 6 wrs and rbs
+    if posRank <= (posRange / 4):
+        offset = (proj - posAvg) + (((posRange / 2) - posRank) * 10)
+    # top 8 qbs and tes, top 16 wrs and rbs
+    elif posRank <= (posRange * (2 / 3)):
+        offset = (proj - posAvg) + ((posRange / 2) - posRank)
+    # top 18 qbs and tes, top 36 wrs and rbs
+    elif posRank < (posRange * 1.5):
+        offset += ((proj - posAvg) * 0.8) + (((posRange / 2) - posRank) * 4)
+    # bench players
+    else:
+        offset += ((proj - posAvg) * 0.8) + (((posRange / 2) - posRank) * 2)
+
+    value = (proj + float(recs) + offset) / 15
+
+    if position == 'QB':
+        value = value * 0.75
+    if value < 1:
+        value = 1.00
+    value = round(value, 2)
+    if value:
+        return value
+    else:
+        return -1
+
+
+# autocomplete for trade_analyzer command
+@trade_analyzer.autocomplete('giving1')
+@trade_analyzer.autocomplete('giving2')
+@trade_analyzer.autocomplete('giving3')
+@trade_analyzer.autocomplete('giving4')
+@trade_analyzer.autocomplete('giving5')
+@trade_analyzer.autocomplete('receiving1')
+@trade_analyzer.autocomplete('receiving2')
+@trade_analyzer.autocomplete('receiving3')
+@trade_analyzer.autocomplete('receiving4')
+@trade_analyzer.autocomplete('receiving5')
+async def trade_analyzer_autocomplete(interaction: discord.Interaction, current: str) -> list[discord.app_commands.Choice[str]]:
+    return await player_autocomplete(interaction, current)
+
 
 # closes the connection when the bot shuts down
 @bot.event
