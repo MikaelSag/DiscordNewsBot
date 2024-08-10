@@ -13,22 +13,13 @@
 - reformat date time DONE
 - add rookies to player database DONE
 - fix schedule DONE
-- speed up database search, fix timeout:
-[2024-08-07 12:00:39] [ERROR   ] discord.app_commands.tree: Ignoring exception in autocomplete for 'start_or_sit'
-Traceback (most recent call last):
-line 1302, in _call
-    await command._invoke_autocomplete(interaction, focused, namespace)
-line 927, in _invoke_autocomplete
-    await interaction.response.autocomplete(choices)
-line 1093, in autocomplete
-    await adapter.create_interaction_response(
-line 221, in request
-    raise NotFound(response, data)
-discord.errors.NotFound: 404 Not Found (error code: 10062): Unknown interaction
-
 - fantasy stats from last season DONE
 - injuries/news?
 - start/sit command (use betting odds rather than projected points)? DONE - used projected points because betting odds change too often and arent published early enough
 - waiver wire report?
 - trade analyzer DONE
+- add more stats for last_season_stats DONE
+- add boom or bust in start_or_sit DONE
+- make trade-analyzer more visually appealing
+- team logos? - Cant be done the way I'd want
 

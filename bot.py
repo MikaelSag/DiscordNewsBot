@@ -473,19 +473,69 @@ async def player_autocomplete(interaction: discord.Interaction, current: str) ->
 async def last_season_stats(interaction: discord.Interaction, player: str):
     with sqlite3.connect("draft_board.db") as storage:
         cursor = storage.cursor()
-        query = 'SELECT points_per_game, ranking, games_played FROM last_year_stats WHERE player=?'
+        query = 'SELECT points_per_game, ranking, games_played, stat1, stat2, stat3, stat4, stat5, stat6 FROM last_year_stats WHERE player=?'
         cursor.execute(query, (player,))
         player_info = cursor.fetchall()
 
     if not player_info:
         await interaction.response.send_message(f'There are no recorded stats for {player}. Check your spelling.', ephemeral=True)
     else:
-        ppg, rank, games_played = player_info[0]
+        ppg, rank, games_played, stat1, stat2, stat3, stat4, stat5, stat6 = player_info[0]
+
+        if 'QB' in rank:
+            stat1_name = 'Passing Yards'
+            stat2_name = 'Passing TDs'
+            stat3_name = 'Interceptions'
+            stat4_name = 'Rushing Attempts'
+            stat5_name = 'Rushing Yards'
+            stat6_name = 'Rushing TDs'
+        elif 'RB' in rank:
+            stat1_name = 'Rushing Attempts'
+            stat2_name = 'Rushing Yards'
+            stat3_name = 'Total TDs'
+            stat4_name = 'Targets'
+            stat5_name = 'Receptions'
+            stat6_name = 'Receiving Yards'
+        elif 'WR' in rank:
+            stat1_name = 'Targets'
+            stat2_name = 'Receptions'
+            stat3_name = 'Receiving Yards'
+            stat4_name = 'Total TDs'
+            stat5_name = 'Rushing Attempts'
+            stat6_name = 'Rushing Yards'
+        elif 'TE' in rank:
+            stat1_name = 'Targets'
+            stat2_name = 'Catches'
+            stat3_name = 'Receiving Yards'
+            stat4_name = 'Receiving TDs'
+            stat5_name = 'null'
+            stat6_name = 'null'
 
         stats_embed = discord.Embed(title=f"{player}'s 2023-24 Stats", color=0x00ffd5)
-        stats_embed.add_field(name='Rank', value=rank, inline=False)
-        stats_embed.add_field(name='Fantasy Points per Game', value=ppg, inline=False)
-        stats_embed.add_field(name='Games Played', value=games_played, inline=False)
+        stats_embed.set_author(name="Fantasy Football Bot", icon_url="https://seeklogo.com/images/N/nfl-logo-B2C95E8E88-seeklogo.com.png")
+        stats_embed.add_field(name='Rank', value=rank, inline=True)
+        stats_embed.add_field(name='Fantasy PPG', value=ppg, inline=True)
+        stats_embed.add_field(name='Games Played', value=games_played, inline=True)
+        stats_embed.add_field(name='', value='', inline=False)
+        if 'null' not in stat5_name:
+            stats_embed.add_field(name=stat1_name, value=stat1, inline=True)
+            stats_embed.add_field(name=stat4_name, value=stat4, inline=True)
+            stats_embed.add_field(name='', value='', inline=False)
+            stats_embed.add_field(name=stat2_name, value=stat2, inline=True)
+            stats_embed.add_field(name=stat5_name, value=stat5, inline=True)
+            stats_embed.add_field(name='', value='', inline=False)
+            stats_embed.add_field(name=stat3_name, value=stat3, inline=True)
+            stats_embed.add_field(name=stat6_name, value=stat6, inline=True)
+        else:
+            stats_embed.add_field(name=stat1_name, value=stat1, inline=True)
+            stats_embed.add_field(name=stat3_name, value=stat3, inline=True)
+            stats_embed.add_field(name='', value='', inline=False)
+            stats_embed.add_field(name=stat2_name, value=stat2, inline=True)
+            stats_embed.add_field(name=stat4_name, value=stat4, inline=True)
+
+        stats_embed.add_field(name='', value='', inline=False)
+        stats_embed.timestamp = datetime.now()
+        stats_embed.set_footer(text='Last Season Stats')
 
         await interaction.response.send_message(embed=stats_embed, ephemeral=True)
 
@@ -533,10 +583,58 @@ async def start_or_sit(interaction: discord.Interaction, player1: str, player2: 
         # get consensus player projections for user chosen players and week
         url1 = requests.get(f"https://www.fantasypros.com/nfl/projections/{position1}.php?week={week}&scoring=PPR")
         url2 = requests.get(f"https://www.fantasypros.com/nfl/projections/{position2}.php?week={week}&scoring=PPR")
+
+        if position1 == 'qb':
+            url3 = requests.get(f"https://www.fantasypros.com/nfl/reports/boom-bust-qb.php")
+        else:
+            url3 = requests.get(f"https://www.fantasypros.com/nfl/reports/ppr-boom-bust-{position1}.php")
+        if position2 == 'qb':
+            url4 = requests.get(f"https://www.fantasypros.com/nfl/reports/boom-bust-qb.php")
+        else:
+            url4 = requests.get(f"https://www.fantasypros.com/nfl/reports/ppr-boom-bust-{position2}.php")
+
         doc1 = BeautifulSoup(url1.text, "html.parser")
         doc2 = BeautifulSoup(url2.text, "html.parser")
+        doc3 = BeautifulSoup(url3.text, "html.parser")
+        doc4 = BeautifulSoup(url4.text, "html.parser")
+
         player1_info = doc1.findAll("td")
         player2_info = doc2.findAll("td")
+        player1_bust = doc3.findAll("td")
+        player2_bust = doc4.findAll("td")
+
+        # get boom and bust percentages
+        check1 = False
+        check2 = False
+        boom1 = ''
+        bust1 = ''
+        i = 0
+        for player in player1_bust:
+            if check2 and '%' not in player.text:
+                bust1 = player1_bust[i - 2].text
+                break
+            if check1 and '%' in player.text and not check2:
+                check2 = True
+                boom1 = player.text
+            if player1 in player.text:
+                check1 = True
+            i += 1
+
+        check1 = False
+        check2 = False
+        boom2 = ''
+        bust2 = ''
+        i = 0
+        for player in player2_bust:
+            if check2 and '%' not in player.text:
+                bust2 = player2_bust[i - 2].text
+                break
+            if check1 and '%' in player.text and not check2:
+                check2 = True
+                boom2 = player.text
+            if player2 in player.text:
+                check1 = True
+            i += 1
 
         # formatting for data scrape
         pos1_offset = 0
@@ -625,12 +723,23 @@ async def start_or_sit(interaction: discord.Interaction, player1: str, player2: 
 
         # display information to user in an embed
         compare_embed = discord.Embed(title=f"{formatted_week} Player Comparison", color=discord.Color.orange())
-        compare_embed.add_field(name=player1, value='', inline=False)
+        compare_embed.set_author(name="Fantasy Football Bot", icon_url="https://seeklogo.com/images/N/nfl-logo-B2C95E8E88-seeklogo.com.png")
+        compare_embed.add_field(name=f"**{player1}**", value="", inline=True)
+        compare_embed.add_field(name=f"{position1.upper()} • {team1}", value='', inline=True)
         compare_embed.add_field(name="Game Info", value=f"{away1} @ {home1} \n{date1} at {time1}", inline=False)
         compare_embed.add_field(name="Projected Points", value=projection1, inline=False)
-        compare_embed.add_field(name=player2, value='', inline=False)
+        compare_embed.add_field(name="Boom Chance", value=boom1, inline=True)
+        compare_embed.add_field(name="Bust Chance", value=bust1, inline=True)
+        compare_embed.add_field(name="", value="------------------------------", inline=False)
+        compare_embed.add_field(name=f"**{player2}**", value='', inline=True)
+        compare_embed.add_field(name=f"{position2.upper()} • {team2}", value='', inline=True)
         compare_embed.add_field(name="Game Info", value=f"{away2} @ {home2} \n{date2} at {time2}", inline=False)
         compare_embed.add_field(name="Projected Points", value=projection2, inline=False)
+        compare_embed.add_field(name="Boom Chance", value=boom2, inline=True)
+        compare_embed.add_field(name="Bust Chance", value=bust2, inline=True)
+        compare_embed.add_field(name='', value='', inline=False)
+        compare_embed.timestamp = datetime.now()
+        compare_embed.set_footer(text='Start or Sit')
 
         await interaction.followup.edit_message(initial_message.id, content=None, embed=compare_embed)
 
@@ -777,12 +886,12 @@ async def trade_analyzer(interaction: discord.Interaction, giving1: str = None, 
         outcome = ''
 
         if difference > 4:
-            if difference < 12:
+            if difference < 10:
                 outcome = "It's close, but the trade doesn't favor your team"
             else:
                 outcome = "Based on our projections, you shouldn't make this trade"
         elif difference < -4:
-            if difference > -12:
+            if difference > -10:
                 outcome = "The trade favors your team, but not by a lot"
             else:
                 outcome = "Great trade, we think you should do it"
@@ -796,8 +905,9 @@ async def trade_analyzer(interaction: discord.Interaction, giving1: str = None, 
         trade_embed.add_field(name="\u200b", value="\u200b", inline=False)
         trade_embed.add_field(name="Trading For", value=receiving_player_string, inline=True)
         trade_embed.add_field(name=f"{receiving_sum:.2f}", value=receiving_score_string, inline=True)
-
-
+        trade_embed.add_field(name="\u200b", value="\u200b", inline=False)
+        trade_embed.timestamp = datetime.now()
+        trade_embed.set_footer(text='Trade Analyzer')
         await interaction.followup.edit_message(initial_message.id, content=None, embed=trade_embed)
 
 async def calculate_trade_value(player1, position):
