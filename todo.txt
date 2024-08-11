@@ -20,6 +20,7 @@
 - trade analyzer DONE
 - add more stats for last_season_stats DONE
 - add boom or bust in start_or_sit DONE
-- make trade-analyzer more visually appealing
-- team logos? - Cant be done the way I'd want
+- make trade-analyzer more visually appealing DONE
+- add more current stats to trade analyzer DONE
+- team logos? - Done for commands with only one player
 
