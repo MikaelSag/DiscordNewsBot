@@ -2,6 +2,7 @@ import os
 import discord
 import sqlite3
 import requests
+import re
 from discord.ext import commands
 from discord import app_commands
 from discord.ui import View, Select, Button, Modal, TextInput
@@ -86,14 +87,14 @@ async def on_ready():
 
 # class for creating the draft board
 class DraftBoardViewWithSelect(View):
-    def __init__(self, draft_board):
+    def __init__(self, draft_board, invoker_id):
         super().__init__(timeout=None)
         self.draft_board = draft_board
         self.selected_player_index = None
         self.currently_moving_player = None
         self.page = 0
         self.items_per_page = 12
-
+        self.invoker_id = invoker_id
         self.select_menu = Select(
             placeholder='Select a player to move',
             options=[
@@ -133,6 +134,12 @@ class DraftBoardViewWithSelect(View):
         self.add_item(next_page_button)
 
         self.update_options()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.invoker_id:
+            await interaction.response.send_message("You are not authorized to use these buttons.", ephemeral=True)
+            return False
+        return True
 
     # selecting player drop down
     async def select_callback(self, interaction: discord.Interaction):
@@ -321,11 +328,12 @@ class MoveToPositionModal(Modal):
 
 # class for existing custom draft board
 class DraftBoardViewWithoutSelect(View):
-    def __init__(self, draft_board):
+    def __init__(self, draft_board, invoker_id):
         super().__init__(timeout=None)
         self.draft_board = draft_board
         self.page = 0
         self.items_per_page = 12
+        self.invoker_id = invoker_id
 
         edit_button = Button(label='Edit', style=discord.ButtonStyle.primary)
         edit_button.callback = self.edit_callback
@@ -344,6 +352,12 @@ class DraftBoardViewWithoutSelect(View):
         self.add_item(next_page_button)
 
         self.update_options()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.invoker_id:
+            await interaction.response.send_message("You are not authorized to use these buttons.", ephemeral=True)
+            return False
+        return True
 
     def update_options(self):
         start_index = self.page * self.items_per_page
@@ -372,7 +386,7 @@ class DraftBoardViewWithoutSelect(View):
     async def edit_callback(self, interaction: discord.Interaction):
         user_id = interaction.user.id
         existing_players = await load_existing(user_id)
-        view = DraftBoardViewWithSelect(existing_players[:])
+        view = DraftBoardViewWithSelect(existing_players[:], invoker_id=self.invoker_id)
         await interaction.response.edit_message(
             content="Editing your Draft Board:\n" + "\n".join(f"{i + 1}. {player[0]}" for i, player in enumerate(existing_players[:12])),
             view=view
@@ -463,7 +477,7 @@ async def create_draftboard(interaction: discord.Interaction):
     check = await check_exists(user_id)
     if not check:
         initial_players = await load_starting()
-        view = DraftBoardViewWithSelect(initial_players[:])
+        view = DraftBoardViewWithSelect(initial_players[:], invoker_id=interaction.user.id)
         await interaction.response.send_message(
             content="Current Draft Board:\n" + "\n".join(f"{i + 1}. {player[0]}" for i, player in enumerate(initial_players[:12])), view=view
         )
@@ -479,7 +493,7 @@ async def manage_draftboard(interaction: discord.Interaction):
     check = await check_exists(user_id)
     if check:
         existing_players = await load_existing(user_id)
-        view = DraftBoardViewWithoutSelect(existing_players)
+        view = DraftBoardViewWithoutSelect(existing_players, invoker_id=interaction.user.id)
 
         await interaction.response.send_message(
             content=view.create_draft_board_message(), view=view
@@ -601,7 +615,7 @@ async def last_season_stats_player_autocomplete(interaction: discord.Interaction
     return await player_autocomplete(interaction, current)
 
 # retrieves player's stats from last season from the database and displays them for a player chosen by the user
-@bot.tree.command(name='current_stats', description="View a player's fantasy football stats from this season (2024-25)")
+@bot.tree.command(name='current_stats', description="View a player's fantasy football stats from the 2024-25 seaso")
 @app_commands.describe(player="Enter the player whose stats you'd like to view")
 async def current_stats(interaction: discord.Interaction, player: str):
     await interaction.response.send_message("Gathering information, please wait...", ephemeral=True)
@@ -1198,6 +1212,7 @@ async def trade_analyzer(interaction: discord.Interaction, giving1: str = None, 
     # display information to user in an embed
     trade_embed = discord.Embed(title=outcome, color=discord.Color.brand_red())
     trade_embed.set_author(name="Fantasy Football Bot", icon_url="https://seeklogo.com/images/N/nfl-logo-B2C95E8E88-seeklogo.com.png")
+    trade_embed.add_field(name='', value='', inline=False)
     trade_embed.add_field(name=f"Trading Away", value=giving_player_string, inline=True)
     trade_embed.add_field(name="ROS Ranking", value=giving_rank_string, inline=True)
     trade_embed.add_field(name=f"Trade Value", value=giving_score_string, inline=True)
@@ -1306,6 +1321,59 @@ async def calculate_trade_value(player1, position, team1, rank1):
 async def trade_analyzer_autocomplete(interaction: discord.Interaction, current: str) -> list[discord.app_commands.Choice[str]]:
     return await player_autocomplete(interaction, current)
 
+@bot.tree.command(name='breaking_news', description='View recent fantasy football relevant news in the NFL.')
+async def breaking_news(interaction: discord.Interaction):
+    await interaction.response.send_message("Gathering information, please wait...", ephemeral=True)
+    initial_message = await interaction.original_response()
+
+    url = requests.get("https://www.fantasypros.com/nfl/breaking-news.php")
+    doc = BeautifulSoup(url.text, "html.parser")
+    news = doc.findAll("div", attrs='player-news-header')
+
+    i = 0
+    headers = []
+    info = []
+    for x in news:
+        if i == 7:
+            break
+        headers.append(x.text.strip())
+        i += 1
+
+    j = 0
+    for header in headers:
+        desc = news[j].parent.text.strip()
+        if "Fantasy Impact" in desc:
+            temp = desc.split("Fantasy Impact: ")
+            info.append(temp[1])
+
+        match = re.search(r'(Mon|Tue|Wed|Thu|Fri|Sat|Sun), [A-Za-z]{3} \d{1,2}(st|nd|rd|th) \d{1,2}:\d{2}[ap]m', header)
+        if match:
+            date_part = match.group(0)
+            headers[j] = header.replace(date_part, f"\n{date_part}")
+        else:
+            print("date could not be formatted")
+        j += 1
+
+    if len(headers) != 7:
+        await interaction.followup.edit_message(initial_message.id, content="There was an issue retrieving the news")
+        print(len(headers))
+        return
+
+    news_embed = discord.Embed(
+        title="Fantasy Football News",
+        description="[All News](https://www.fantasypros.com/nfl/breaking-news.php)",
+        color=discord.Color.dark_magenta())
+    news_embed.set_author(name="Fantasy Football Bot", icon_url="https://seeklogo.com/images/N/nfl-logo-B2C95E8E88-seeklogo.com.png")
+    news_embed.add_field(name=headers[0], value=info[0], inline=False)
+    news_embed.add_field(name=headers[1], value=info[1], inline=False)
+    news_embed.add_field(name=headers[2], value=info[2], inline=False)
+    news_embed.add_field(name=headers[3], value=info[3], inline=False)
+    news_embed.add_field(name=headers[4], value=info[4], inline=False)
+    news_embed.add_field(name=headers[5], value=info[5], inline=False)
+    news_embed.add_field(name=headers[6], value=info[6], inline=False)
+    news_embed.timestamp = datetime.now()
+    news_embed.set_footer(text='Breaking News')
+    await interaction.followup.edit_message(initial_message.id, content=None, embed=news_embed)
 
 # closes the connection when the bot shuts down
 @bot.event
