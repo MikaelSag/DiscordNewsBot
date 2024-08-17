@@ -135,6 +135,7 @@ class DraftBoardViewWithSelect(View):
 
         self.update_options()
 
+    # check if user who pressed button is the same user that initiated the command
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.invoker_id:
             await interaction.response.send_message("You are not authorized to use these buttons.", ephemeral=True)
@@ -479,7 +480,7 @@ async def create_draftboard(interaction: discord.Interaction):
         initial_players = await load_starting()
         view = DraftBoardViewWithSelect(initial_players[:], invoker_id=interaction.user.id)
         await interaction.response.send_message(
-            content="Current Draft Board:\n" + "\n".join(f"{i + 1}. {player[0]}" for i, player in enumerate(initial_players[:12])), view=view
+            content="Current Draft Board:\n" + "\n".join(f"{i + 1}. {player[0]}" for i, player in enumerate(initial_players[:12])), view=view, ephemeral=True
         )
     else:
         await interaction.response.send_message(
@@ -496,7 +497,7 @@ async def manage_draftboard(interaction: discord.Interaction):
         view = DraftBoardViewWithoutSelect(existing_players, invoker_id=interaction.user.id)
 
         await interaction.response.send_message(
-            content=view.create_draft_board_message(), view=view
+            content=view.create_draft_board_message(), view=view, ephemeral=True
         )
     else:
         await interaction.response.send_message(
@@ -525,68 +526,262 @@ async def player_autocomplete(interaction: discord.Interaction, current: str) ->
 @bot.tree.command(name='last_season_stats', description="View a player's fantasy football stats from the 2023-24 season")
 @app_commands.describe(player="Enter the player whose stats you'd like to view")
 async def last_season_stats(interaction: discord.Interaction, player: str):
-    with sqlite3.connect("draft_board.db") as storage:
-        cursor = storage.cursor()
-        query = 'SELECT points_per_game, ranking, games_played, stat1, stat2, stat3, stat4, stat5, stat6 FROM last_year_stats WHERE player=?'
-        cursor.execute(query, (player,))
-        player_info = cursor.fetchall()
+    await interaction.response.defer(thinking=True, ephemeral=True)
 
-    if not player_info:
-        await interaction.response.send_message(f'There are no recorded stats for {player}. Check your spelling.', ephemeral=True)
-    else:
-        ppg, rank, games_played, stat1, stat2, stat3, stat4, stat5, stat6 = player_info[0]
+    try:
+        # get all stats of player from database
+        with sqlite3.connect("draft_board.db") as storage:
+            cursor = storage.cursor()
+            query = 'SELECT points_per_game, ranking, games_played, stat1, stat2, stat3, stat4, stat5, stat6 FROM last_year_stats WHERE player=?'
+            cursor.execute(query, (player,))
+            player_info = cursor.fetchall()
 
-        if 'QB' in rank:
+        if not player_info:
+            await interaction.followup.send(f'There are no recorded stats for {player}. Check your spelling.', ephemeral=True)
+        else:
+            ppg, rank, games_played, stat1, stat2, stat3, stat4, stat5, stat6 = player_info[0]
+
+            if 'QB' in rank:
+                stat1_name = 'Passing Yards'
+                stat2_name = 'Passing TDs'
+                stat3_name = 'Interceptions'
+                stat4_name = 'Rushing Attempts'
+                stat5_name = 'Rushing Yards'
+                stat6_name = 'Rushing TDs'
+            elif 'RB' in rank:
+                stat1_name = 'Rushing Attempts'
+                stat2_name = 'Rushing Yards'
+                stat3_name = 'Total TDs'
+                stat4_name = 'Targets'
+                stat5_name = 'Receptions'
+                stat6_name = 'Receiving Yards'
+            elif 'WR' in rank:
+                stat1_name = 'Targets'
+                stat2_name = 'Receptions'
+                stat3_name = 'Receiving Yards'
+                stat4_name = 'Total TDs'
+                stat5_name = 'Rushing Attempts'
+                stat6_name = 'Rushing Yards'
+            elif 'TE' in rank:
+                stat1_name = 'Targets'
+                stat2_name = 'Catches'
+                stat3_name = 'Receiving Yards'
+                stat4_name = 'Receiving TDs'
+                stat5_name = 'null'
+                stat6_name = 'null'
+
+            position = rank[:2]
+
+            # get team from website
+            url = requests.get(f"https://www.cbssports.com/fantasy/football/stats/{position}/2023/season/stats/ppr/")
+            doc = BeautifulSoup(url.text, "html.parser")
+            player_names = doc.findAll("span", attrs="CellPlayerName--long")
+
+            for name in player_names:
+                if player in name.text:
+                    playerStr = name.text
+                    break
+            playerStr = playerStr.strip()
+            team = playerStr[-3:].strip()
+
+            # get logo
+            logo = await get_logo(team)
+            if not logo:
+                logo = "https://seeklogo.com/images/N/nfl-logo-B2C95E8E88-seeklogo.com.png"
+
+            # display stats in embed
+            stats_embed = discord.Embed(title=f"{player}'s 2023-24 Stats", color=0x00ffd5)
+            stats_embed.set_author(name="Fantasy Football Bot", icon_url=logo)
+            stats_embed.add_field(name='Rank', value=rank, inline=True)
+            stats_embed.add_field(name='Fantasy PPG', value=ppg, inline=True)
+            stats_embed.add_field(name='Games Played', value=games_played, inline=True)
+            stats_embed.add_field(name='', value='', inline=False)
+            if 'null' not in stat5_name:
+                stats_embed.add_field(name=stat1_name, value=stat1, inline=True)
+                stats_embed.add_field(name=stat4_name, value=stat4, inline=True)
+                stats_embed.add_field(name='', value='', inline=False)
+                stats_embed.add_field(name=stat2_name, value=stat2, inline=True)
+                stats_embed.add_field(name=stat5_name, value=stat5, inline=True)
+                stats_embed.add_field(name='', value='', inline=False)
+                stats_embed.add_field(name=stat3_name, value=stat3, inline=True)
+                stats_embed.add_field(name=stat6_name, value=stat6, inline=True)
+            else:
+                stats_embed.add_field(name=stat1_name, value=stat1, inline=True)
+                stats_embed.add_field(name=stat3_name, value=stat3, inline=True)
+                stats_embed.add_field(name='', value='', inline=False)
+                stats_embed.add_field(name=stat2_name, value=stat2, inline=True)
+                stats_embed.add_field(name=stat4_name, value=stat4, inline=True)
+
+            stats_embed.add_field(name='', value='', inline=False)
+            stats_embed.timestamp = datetime.now()
+            stats_embed.set_footer(text='Last Season Stats')
+
+            await interaction.followup.send(embed=stats_embed, ephemeral=True)
+
+    except Exception as e:
+        await interaction.followup.send(f"An error occurred: {str(e)}", ephemeral=True)
+
+# adds autocompletion for last_season_stats
+@last_season_stats.autocomplete('player')
+async def last_season_stats_player_autocomplete(interaction: discord.Interaction, current: str) -> list[discord.app_commands.Choice[str]]:
+    return await player_autocomplete(interaction, current)
+
+# retrieves player's stats from the current season and displays them for a player chosen by the user
+@bot.tree.command(name='current_stats', description="View a player's fantasy football stats from the 2024-25 season")
+@app_commands.describe(player="Enter the player whose stats you'd like to view")
+async def current_stats(interaction: discord.Interaction, player: str):
+    await interaction.response.defer(thinking=True, ephemeral=True)
+
+    try:
+        # get position of player
+        with sqlite3.connect("draft_board.db") as storage:
+            cursor = storage.cursor()
+            query = 'SELECT ranking FROM last_year_stats WHERE player=?'
+            cursor.execute(query, (player,))
+            player_info = cursor.fetchall()
+
+        if not player_info:
+            await interaction.followup.send(content=f"We couldn't find {player} in our database")
+            return
+        else:
+            position = player_info[0][0][:2]
+        if 'QB' in position:
             stat1_name = 'Passing Yards'
             stat2_name = 'Passing TDs'
             stat3_name = 'Interceptions'
             stat4_name = 'Rushing Attempts'
             stat5_name = 'Rushing Yards'
             stat6_name = 'Rushing TDs'
-        elif 'RB' in rank:
+        elif 'RB' in position:
             stat1_name = 'Rushing Attempts'
             stat2_name = 'Rushing Yards'
             stat3_name = 'Total TDs'
             stat4_name = 'Targets'
             stat5_name = 'Receptions'
             stat6_name = 'Receiving Yards'
-        elif 'WR' in rank:
+        elif 'WR' in position:
             stat1_name = 'Targets'
             stat2_name = 'Receptions'
             stat3_name = 'Receiving Yards'
             stat4_name = 'Total TDs'
             stat5_name = 'Rushing Attempts'
             stat6_name = 'Rushing Yards'
-        elif 'TE' in rank:
+        elif 'TE' in position:
             stat1_name = 'Targets'
             stat2_name = 'Catches'
             stat3_name = 'Receiving Yards'
             stat4_name = 'Receiving TDs'
             stat5_name = 'null'
             stat6_name = 'null'
+        else:
+            await interaction.followup.send(content=f"We couldn't find any stats for {player}")
+            return
 
-        position = rank[:2]
-        url = requests.get(f"https://www.cbssports.com/fantasy/football/stats/{position}/2023/season/stats/ppr/")
+        # get stats from online
+        url = requests.get(f"https://www.cbssports.com/fantasy/football/stats/{position}/2024/season/stats/ppr/")
         doc = BeautifulSoup(url.text, "html.parser")
         player_names = doc.findAll("span", attrs="CellPlayerName--long")
+        stats = doc.findAll("td", attrs="TableBase-bodyTd")
 
+        # find player in html
+        playerStr = ''
+        i = 0
         for name in player_names:
             if player in name.text:
                 playerStr = name.text
                 break
+            i += 1
+
+        if not playerStr:
+            await interaction.followup.send(f"We couldn't find any stats for {player}", ephemeral=True)
+            return
+
         playerStr = playerStr.strip()
         team = playerStr[-3:].strip()
+        rank = position + str(i + 1)
 
+        # define offsets based on position
+        if 'QB' in position:
+            pos_multi = 16
+            offset1 = 1
+            offset2 = 4
+            offset3 = 6
+            offset4 = 7
+            offset5 = 9
+            offset6 = 10
+            offset7 = 12
+            offset8 = 15
+        elif 'RB' in position:
+            pos_multi = 15
+            offset1 = 1
+            offset2 = 2
+            offset3 = 3
+            offset4 = 5
+            offset5 = 6
+            offset6 = 7
+            offset7 = 8
+            offset8 = 11
+            offset9 = 14
+        elif 'WR' in position:
+            pos_multi = 15
+            offset1 = 1
+            offset2 = 2
+            offset3 = 3
+            offset4 = 4
+            offset5 = 7
+            offset6 = 8
+            offset7 = 9
+            offset8 = 11
+            offset9 = 14
+        elif 'TE' in position:
+            pos_multi = 11
+            offset1 = 1
+            offset2 = 2
+            offset3 = 3
+            offset4 = 4
+            offset5 = 7
+            offset6 = 10
+
+        # retrieve stats based on offsets
+        games_played = stats[i * pos_multi + offset1].text.strip()
+        stat1 = stats[i * pos_multi + offset2].text.strip()
+        stat2 = stats[i * pos_multi + offset3].text.strip()
+        stat3 = stats[i * pos_multi + offset4].text.strip()
+        stat4 = stats[i * pos_multi + offset5].text.strip()
+
+        if 'TE' in position:
+            ppg = stats[i * pos_multi + offset6].text.strip()
+        else:
+            stat5 = stats[i * pos_multi + offset6].text.strip()
+            stat6 = stats[i * pos_multi + offset7].text.strip()
+            if 'QB' in position:
+                ppg = stats[i * pos_multi + offset8].text.strip()
+            elif 'RB' in position or 'WR' in position:
+                stat_add = stats[i * pos_multi + offset8].text.strip()
+                ppg = stats[i * pos_multi + offset9].text.strip()
+
+        # adjust stat values for certain positions
+        if 'RB' in position:
+            if '—' not in stat3 or '—' not in stat_add:
+                stat3 = str(int(stat3) + int(stat_add))
+
+        if 'WR' in position:
+            if '—' not in stat4 or '—' not in stat_add:
+                stat4 = str(int(stat4) + int(stat_add))
+
+        # get the logo for the player's team
         logo = await get_logo(team)
         if not logo:
             logo = "https://seeklogo.com/images/N/nfl-logo-B2C95E8E88-seeklogo.com.png"
 
-        stats_embed = discord.Embed(title=f"{player}'s 2023-24 Stats", color=0x00ffd5)
+        # create the embed to display the info
+        stats_embed = discord.Embed(title=f"{player}'s 2024-25 Stats", color=discord.Color.brand_green())
         stats_embed.set_author(name="Fantasy Football Bot", icon_url=logo)
         stats_embed.add_field(name='Rank', value=rank, inline=True)
         stats_embed.add_field(name='Fantasy PPG', value=ppg, inline=True)
         stats_embed.add_field(name='Games Played', value=games_played, inline=True)
         stats_embed.add_field(name='', value='', inline=False)
+
         if 'null' not in stat5_name:
             stats_embed.add_field(name=stat1_name, value=stat1, inline=True)
             stats_embed.add_field(name=stat4_name, value=stat4, inline=True)
@@ -605,185 +800,14 @@ async def last_season_stats(interaction: discord.Interaction, player: str):
 
         stats_embed.add_field(name='', value='', inline=False)
         stats_embed.timestamp = datetime.now()
-        stats_embed.set_footer(text='Last Season Stats')
+        stats_embed.set_footer(text='Current Stats')
 
-        await interaction.response.send_message(embed=stats_embed, ephemeral=True)
+        await interaction.followup.send(embed=stats_embed, ephemeral=True)
 
-# adds autocompletion for last_season_stats 'player' field
-@last_season_stats.autocomplete('player')
-async def last_season_stats_player_autocomplete(interaction: discord.Interaction, current: str) -> list[discord.app_commands.Choice[str]]:
-    return await player_autocomplete(interaction, current)
+    except Exception as e:
+        await interaction.followup.send(f"An error occurred: {str(e)}", ephemeral=True)
 
-# retrieves player's stats from last season from the database and displays them for a player chosen by the user
-@bot.tree.command(name='current_stats', description="View a player's fantasy football stats from the 2024-25 seaso")
-@app_commands.describe(player="Enter the player whose stats you'd like to view")
-async def current_stats(interaction: discord.Interaction, player: str):
-    await interaction.response.send_message("Gathering information, please wait...", ephemeral=True)
-    initial_message = await interaction.original_response()
-    with sqlite3.connect("draft_board.db") as storage:
-        cursor = storage.cursor()
-        query = 'SELECT ranking FROM last_year_stats WHERE player=?'
-        cursor.execute(query, (player,))
-        player_info = cursor.fetchall()
-
-    if not player_info:
-        await interaction.followup.edit_message(initial_message.id, content=f"We couldn't find {player} in our database :(")
-        return
-    else:
-        position = player_info[0][0][:2]
-    if 'QB' in position:
-        stat1_name = 'Passing Yards'
-        stat2_name = 'Passing TDs'
-        stat3_name = 'Interceptions'
-        stat4_name = 'Rushing Attempts'
-        stat5_name = 'Rushing Yards'
-        stat6_name = 'Rushing TDs'
-    elif 'RB' in position:
-        stat1_name = 'Rushing Attempts'
-        stat2_name = 'Rushing Yards'
-        stat3_name = 'Total TDs'
-        stat4_name = 'Targets'
-        stat5_name = 'Receptions'
-        stat6_name = 'Receiving Yards'
-    elif 'WR' in position:
-        stat1_name = 'Targets'
-        stat2_name = 'Receptions'
-        stat3_name = 'Receiving Yards'
-        stat4_name = 'Total TDs'
-        stat5_name = 'Rushing Attempts'
-        stat6_name = 'Rushing Yards'
-    elif 'TE' in position:
-        stat1_name = 'Targets'
-        stat2_name = 'Catches'
-        stat3_name = 'Receiving Yards'
-        stat4_name = 'Receiving TDs'
-        stat5_name = 'null'
-        stat6_name = 'null'
-    else:
-        await interaction.followup.edit_message(initial_message.id, content=f"We couldn't find any stats for {player}")
-        return
-
-    url = requests.get(f"https://www.cbssports.com/fantasy/football/stats/{position}/2024/season/stats/ppr/")
-    doc = BeautifulSoup(url.text, "html.parser")
-    player_names = doc.findAll("span", attrs="CellPlayerName--long")
-    stats = doc.findAll("td", attrs="TableBase-bodyTd")
-    playerStr = ''
-    # get player index
-    i = 0
-    for name in player_names:
-        if player in name.text:
-            playerStr = name.text
-            break
-        i += 1
-
-    if not playerStr:
-        await interaction.followup.edit_message(initial_message.id, content=f"We couldn't find any stats for {player}")
-        return
-
-    playerStr = playerStr.strip()
-    team = playerStr[-3:].strip()
-
-    rank = position + str(i + 1)
-
-    # offsets based on position
-    if 'QB' in position:
-        pos_multi = 16
-        offset1 = 1
-        offset2 = 4
-        offset3 = 6
-        offset4 = 7
-        offset5 = 9
-        offset6 = 10
-        offset7 = 12
-        offset8 = 15
-    elif 'RB' in position:
-        pos_multi = 15
-        offset1 = 1
-        offset2 = 2
-        offset3 = 3
-        offset4 = 5
-        offset5 = 6
-        offset6 = 7
-        offset7 = 8
-        offset8 = 11
-        offset9 = 14
-    elif 'WR' in position:
-        pos_multi = 15
-        offset1 = 1
-        offset2 = 2
-        offset3 = 3
-        offset4 = 4
-        offset5 = 7
-        offset6 = 8
-        offset7 = 9
-        offset8 = 11
-        offset9 = 14
-    elif 'TE' in position:
-        pos_multi = 11
-        offset1 = 1
-        offset2 = 2
-        offset3 = 3
-        offset4 = 4
-        offset5 = 7
-        offset6 = 10
-
-    # get stats
-    games_played = stats[i * pos_multi + offset1].text.strip()
-    stat1 = stats[i * pos_multi + offset2].text.strip()
-    stat2 = stats[i * pos_multi + offset3].text.strip()
-    stat3 = stats[i * pos_multi + offset4].text.strip()
-    stat4 = stats[i * pos_multi + offset5].text.strip()
-    if 'TE' in position:
-        ppg = stats[i * pos_multi + offset6].text.strip()
-    else:
-        stat5 = stats[i * pos_multi + offset6].text.strip()
-        stat6 = stats[i * pos_multi + offset7].text.strip()
-        if 'QB' in position:
-            ppg = stats[i * pos_multi + offset8].text.strip()
-        elif 'RB' in position or 'WR' in position:
-            stat_add = stats[i * pos_multi + offset8].text.strip()
-            ppg = stats[i * pos_multi + offset9].text.strip()
-
-    if 'RB' in position:
-        if '—' not in stat3 or '—' not in stat_add:
-            stat3 = str(int(stat3) + int(stat_add))
-
-    if 'WR' in position:
-        if '—' not in stat4 or '—' not in stat_add:
-            stat4 = str(int(stat4) + int(stat_add))
-
-    logo = await get_logo(team)
-    if not logo:
-        logo = "https://seeklogo.com/images/N/nfl-logo-B2C95E8E88-seeklogo.com.png"
-
-    stats_embed = discord.Embed(title=f"{player}'s 2024-25 Stats", color=discord.Color.brand_green())
-    stats_embed.set_author(name="Fantasy Football Bot", icon_url=logo)
-    stats_embed.add_field(name='Rank', value=rank, inline=True)
-    stats_embed.add_field(name='Fantasy PPG', value=ppg, inline=True)
-    stats_embed.add_field(name='Games Played', value=games_played, inline=True)
-    stats_embed.add_field(name='', value='', inline=False)
-    if 'null' not in stat5_name:
-        stats_embed.add_field(name=stat1_name, value=stat1, inline=True)
-        stats_embed.add_field(name=stat4_name, value=stat4, inline=True)
-        stats_embed.add_field(name='', value='', inline=False)
-        stats_embed.add_field(name=stat2_name, value=stat2, inline=True)
-        stats_embed.add_field(name=stat5_name, value=stat5, inline=True)
-        stats_embed.add_field(name='', value='', inline=False)
-        stats_embed.add_field(name=stat3_name, value=stat3, inline=True)
-        stats_embed.add_field(name=stat6_name, value=stat6, inline=True)
-    else:
-        stats_embed.add_field(name=stat1_name, value=stat1, inline=True)
-        stats_embed.add_field(name=stat3_name, value=stat3, inline=True)
-        stats_embed.add_field(name='', value='', inline=False)
-        stats_embed.add_field(name=stat2_name, value=stat2, inline=True)
-        stats_embed.add_field(name=stat4_name, value=stat4, inline=True)
-
-    stats_embed.add_field(name='', value='', inline=False)
-    stats_embed.timestamp = datetime.now()
-    stats_embed.set_footer(text='Current Stats')
-
-    await interaction.followup.edit_message(initial_message.id, content=None, embed=stats_embed)
-
+# adds autocomplete functionality for /current_stats
 @current_stats.autocomplete('player')
 async def current_stats_player_autocomplete(interaction: discord.Interaction, current: str) -> list[discord.app_commands.Choice[str]]:
     return await player_autocomplete(interaction, current)
@@ -794,248 +818,255 @@ async def current_stats_player_autocomplete(interaction: discord.Interaction, cu
 @app_commands.describe(player2="Enter the second player you'd like to compare")
 @app_commands.describe(week="Enter the week you'd like to compare stats in")
 async def start_or_sit(interaction: discord.Interaction, player1: str, player2: str, week: str):
-    await interaction.response.send_message("Gathering information, please wait...", ephemeral=True)
-    initial_message = await interaction.original_response()
-    # get ranking (just need position) from database of players
-    with sqlite3.connect('draft_board.db') as storage:
-        cursor = storage.cursor()
-        query = "SELECT ranking FROM last_year_stats WHERE player=?"
-        cursor.execute(query, (player1,))
-        pos1 = cursor.fetchall()
-        cursor.execute(query, (player2,))
-        pos2 = cursor.fetchall()
+    await interaction.response.defer(thinking=True, ephemeral=True)
 
-    # format position ranking to be position ex: QB1 -> qb
-    if pos1:
-        position1 = pos1[0][0][:2].lower()
-    elif not pos2:
-        await interaction.followup.edit_message(initial_message.id, content=f"We couldn't find {player1} or {player2} in our database. Try selecting a player from the drop down menu.")
-        return
-    else:
-        await interaction.followup.edit_message(initial_message.id, content=f"We couldn't find {player1} in our database. Try selecting a player from the drop down menu.")
-        return
-    if pos2:
-        position2 = pos2[0][0][:2].lower()
-    else:
-        await interaction.followup.edit_message(initial_message.id, content=f"We couldn't find {player2} in our database. Try selecting a player from the drop down menu.")
-        return
+    try:
+        # get ranking (just need position) from database of players
+        with sqlite3.connect('draft_board.db') as storage:
+            cursor = storage.cursor()
+            query = "SELECT ranking FROM last_year_stats WHERE player=?"
+            cursor.execute(query, (player1,))
+            pos1 = cursor.fetchall()
+            cursor.execute(query, (player2,))
+            pos2 = cursor.fetchall()
 
-    if int(week) > 17 or int(week) < 1:
-        await interaction.followup.edit_message(initial_message.id, content=f"Please enter a week from 1-17. You entered: {week}")
-        return
-    else:
-        # get consensus player projections for user chosen players and week
-        url1 = requests.get(f"https://www.fantasypros.com/nfl/projections/{position1}.php?week={week}&scoring=PPR")
-        url2 = requests.get(f"https://www.fantasypros.com/nfl/projections/{position2}.php?week={week}&scoring=PPR")
-
-        if position1 == 'qb':
-            url3 = requests.get(f"https://www.fantasypros.com/nfl/reports/boom-bust-qb.php")
+        # format position ranking to be position ex: QB1 -> qb
+        if pos1:
+            position1 = pos1[0][0][:2].lower()
+        elif not pos2:
+            await interaction.followup.send(content=f"We couldn't find {player1} or {player2} in our database. Try selecting a player from the drop down menu.", ephemeral=True)
+            return
         else:
-            url3 = requests.get(f"https://www.fantasypros.com/nfl/reports/ppr-boom-bust-{position1}.php")
-        if position2 == 'qb':
-            url4 = requests.get(f"https://www.fantasypros.com/nfl/reports/boom-bust-qb.php")
+            await interaction.followup.send(content=f"We couldn't find {player1} in our database. Try selecting a player from the drop down menu.", ephemeral=True)
+            return
+        if pos2:
+            position2 = pos2[0][0][:2].lower()
         else:
-            url4 = requests.get(f"https://www.fantasypros.com/nfl/reports/ppr-boom-bust-{position2}.php")
+            await interaction.followup.send(content=f"We couldn't find {player2} in our database. Try selecting a player from the drop down menu.", ephemeral=True)
+            return
 
-        doc1 = BeautifulSoup(url1.text, "html.parser")
-        doc2 = BeautifulSoup(url2.text, "html.parser")
-        doc3 = BeautifulSoup(url3.text, "html.parser")
-        doc4 = BeautifulSoup(url4.text, "html.parser")
+        if int(week) > 17 or int(week) < 1:
+            await interaction.followup.send(content=f"Please enter a week from 1-17. You entered: {week}", ephemeral=True)
+            return
+        else:
+            # get consensus player projections for user chosen players and week
+            url1 = requests.get(f"https://www.fantasypros.com/nfl/projections/{position1}.php?week={week}&scoring=PPR")
+            url2 = requests.get(f"https://www.fantasypros.com/nfl/projections/{position2}.php?week={week}&scoring=PPR")
 
-        player1_info = doc1.findAll("td")
-        player2_info = doc2.findAll("td")
-        player1_bust = doc3.findAll("td")
-        player2_bust = doc4.findAll("td")
+            if position1 == 'qb':
+                url3 = requests.get(f"https://www.fantasypros.com/nfl/reports/boom-bust-qb.php")
+            else:
+                url3 = requests.get(f"https://www.fantasypros.com/nfl/reports/ppr-boom-bust-{position1}.php")
+            if position2 == 'qb':
+                url4 = requests.get(f"https://www.fantasypros.com/nfl/reports/boom-bust-qb.php")
+            else:
+                url4 = requests.get(f"https://www.fantasypros.com/nfl/reports/ppr-boom-bust-{position2}.php")
 
-        # get boom and bust percentages
-        check1 = False
-        check2 = False
-        boom1 = ''
-        bust1 = ''
-        i = 0
-        for player in player1_bust:
-            if check2 and '%' not in player.text:
-                bust1 = player1_bust[i - 2].text
-                break
-            if check1 and '%' in player.text and not check2:
-                check2 = True
-                boom1 = player.text
-            if player1 in player.text:
-                check1 = True
-            i += 1
+            doc1 = BeautifulSoup(url1.text, "html.parser")
+            doc2 = BeautifulSoup(url2.text, "html.parser")
+            doc3 = BeautifulSoup(url3.text, "html.parser")
+            doc4 = BeautifulSoup(url4.text, "html.parser")
 
-        check1 = False
-        check2 = False
-        boom2 = ''
-        bust2 = ''
-        i = 0
-        for player in player2_bust:
-            if check2 and '%' not in player.text:
-                bust2 = player2_bust[i - 2].text
-                break
-            if check1 and '%' in player.text and not check2:
-                check2 = True
-                boom2 = player.text
-            if player2 in player.text:
-                check1 = True
-            i += 1
+            player1_info = doc1.findAll("td")
+            player2_info = doc2.findAll("td")
+            player1_bust = doc3.findAll("td")
+            player2_bust = doc4.findAll("td")
 
-        # formatting for data scrape
-        pos1_offset = 0
-        if position1 == "qb":
-            pos1_offset = 10
-        elif position1 == "wr":
-            pos1_offset = 8
-        elif position1 == "rb":
-            pos1_offset = 8
-        elif position1 == "te":
-            pos1_offset = 5
+            # get boom and bust percentages
+            check1 = False
+            check2 = False
+            boom1 = ''
+            bust1 = ''
+            i = 0
+            for player in player1_bust:
+                if check2 and '%' not in player.text:
+                    bust1 = player1_bust[i - 2].text
+                    break
+                if check1 and '%' in player.text and not check2:
+                    check2 = True
+                    boom1 = player.text
+                if player1 in player.text:
+                    check1 = True
+                i += 1
 
-        found1 = False
-        team1 = ''
-        projection1 = ''
+            check1 = False
+            check2 = False
+            boom2 = ''
+            bust2 = ''
+            i = 0
+            for player in player2_bust:
+                if check2 and '%' not in player.text:
+                    bust2 = player2_bust[i - 2].text
+                    break
+                if check1 and '%' in player.text and not check2:
+                    check2 = True
+                    boom2 = player.text
+                if player2 in player.text:
+                    check1 = True
+                i += 1
 
-        for i in range(len(player1_info)):
-            if found1:
-                break
-            if player1 in player1_info[i].text:
-                team1 = player1_info[i].text
-                team1 = team1[-3:].strip()
-                found1 = True
-                projection1 = player1_info[i + pos1_offset].text
+            # define offsets for each position (each position has that many stats on the website until next player)
+            pos1_offset = 0
+            if position1 == "qb":
+                pos1_offset = 10
+            elif position1 == "wr":
+                pos1_offset = 8
+            elif position1 == "rb":
+                pos1_offset = 8
+            elif position1 == "te":
+                pos1_offset = 5
 
-        pos2_offset = 0
-        if position2 == "qb":
-            pos2_offset = 10
-        elif position2 == "wr":
-            pos2_offset = 8
-        elif position2 == "rb":
-            pos2_offset = 8
-        elif position2 == "te":
-            pos2_offset = 5
+            found1 = False
+            team1 = ''
+            projection1 = ''
 
-        found2 = False
-        team2 = ''
-        projection2 = ''
+            # get team and projections for player using position offsets
+            for i in range(len(player1_info)):
+                if found1:
+                    break
+                if player1 in player1_info[i].text:
+                    team1 = player1_info[i].text
+                    team1 = team1[-3:].strip()
+                    found1 = True
+                    projection1 = player1_info[i + pos1_offset].text
 
-        for i in range(len(player2_info)):
-            if found2:
-                break
-            if player2 in player2_info[i].text:
-                team2 = player2_info[i].text
-                team2 = team2[-3:].strip()
-                found2 = True
-                projection2 = player2_info[i + pos2_offset].text
+            pos2_offset = 0
+            if position2 == "qb":
+                pos2_offset = 10
+            elif position2 == "wr":
+                pos2_offset = 8
+            elif position2 == "rb":
+                pos2_offset = 8
+            elif position2 == "te":
+                pos2_offset = 5
 
-        if not projection1:
+            found2 = False
+            team2 = ''
+            projection2 = ''
+
+            for i in range(len(player2_info)):
+                if found2:
+                    break
+                if player2 in player2_info[i].text:
+                    team2 = player2_info[i].text
+                    team2 = team2[-3:].strip()
+                    found2 = True
+                    projection2 = player2_info[i + pos2_offset].text
+
             if not projection1:
-                await interaction.followup.edit_message(initial_message.id, content=f"We couldn't find any projections for {player1} or {player2} :(")
+                if not projection1:
+                    await interaction.followup.send(content=f"We couldn't find any projections for {player1} or {player2}", ephemeral=True)
+                    return
+                await interaction.followup.send(content=f"We couldn't find any projections for {player1}", ephemeral=True)
                 return
-            await interaction.followup.edit_message(initial_message.id, content=f"We couldn't find any projections for {player1} :(")
-            return
-        if not projection2:
-            await interaction.followup.edit_message(initial_message.id, content=f"We couldn't find any projections for {player2} :(")
-            return
-
-        # get game information (time, date, home team, away team, week) from database for relevant games
-        with sqlite3.connect("draft_board.db") as schedule_storage:
-            if 'JAC' in team1:
-                team1 = "JAX"
-            if 'JAC' in team2:
-                team2 = "JAX"
-            formatted_week = f"Week {week}"
-            cursor1 = schedule_storage.cursor()
-            query1 = "SELECT * FROM schedules WHERE (home_team = ? OR away_team = ?) AND week=?"
-            cursor1.execute(query1,(team1, team1, formatted_week))
-            info1 = cursor1.fetchall()
-            cursor1.execute(query1,(team2, team2, formatted_week))
-            info2 = cursor1.fetchall()
-
-        if not info1:
-            if not info2:
-                await interaction.followup.edit_message(initial_message.id, content=f"{player1} and {player2} Don't have a scheduled matches this week!")
+            if not projection2:
+                await interaction.followup.send(content=f"We couldn't find any projections for {player2}", ephemeral=True)
                 return
-            await interaction.followup.edit_message(initial_message.id, content=f"{player1} Doesn't have a scheduled match this week!")
-            return
-        elif not info2:
-            await interaction.followup.edit_message(initial_message.id, content=f"{player2} Doesn't have a scheduled match this week!")
-            return
 
-        position1 = position1.upper()
-        position2 = position2.upper()
+            # get game information (time, date, home team, away team, week) from database for relevant games
+            with sqlite3.connect("draft_board.db") as schedule_storage:
+                if 'JAC' in team1:
+                    team1 = "JAX"
+                if 'JAC' in team2:
+                    team2 = "JAX"
+                formatted_week = f"Week {week}"
+                cursor1 = schedule_storage.cursor()
+                query1 = "SELECT * FROM schedules WHERE (home_team = ? OR away_team = ?) AND week=?"
+                cursor1.execute(query1,(team1, team1, formatted_week))
+                info1 = cursor1.fetchall()
+                cursor1.execute(query1,(team2, team2, formatted_week))
+                info2 = cursor1.fetchall()
 
-        url5 = requests.get(f"https://www.cbssports.com/fantasy/football/stats/{position1}/2024/season/stats/ppr/")
-        doc5 = BeautifulSoup(url5.text, "html.parser")
-        player_names1 = doc5.findAll("span", attrs="CellPlayerName--long")
+            if not info1:
+                if not info2:
+                    await interaction.followup.send(content=f"{player1} and {player2} Don't have a scheduled matches this week!", ephemeral=True)
+                    return
+                await interaction.followup.send(content=f"{player1} Doesn't have a scheduled match this week!", ephemeral=True)
+                return
+            elif not info2:
+                await interaction.followup.send(content=f"{player2} Doesn't have a scheduled match this week!", ephemeral=True)
+                return
 
-        url6 = requests.get(f"https://www.cbssports.com/fantasy/football/stats/{position2}/2024/season/stats/ppr/")
-        doc6 = BeautifulSoup(url6.text, "html.parser")
-        player_names2 = doc6.findAll("span", attrs="CellPlayerName--long")
+            position1 = position1.upper()
+            position2 = position2.upper()
 
-        x = 0
-        found1 = False
-        for name in player_names1:
-            if player1 in name.text:
-                found1 = True
-                break
-            x += 1
+            url5 = requests.get(f"https://www.cbssports.com/fantasy/football/stats/{position1}/2024/season/stats/ppr/")
+            doc5 = BeautifulSoup(url5.text, "html.parser")
+            player_names1 = doc5.findAll("span", attrs="CellPlayerName--long")
 
-        y = 0
-        found2 = False
-        for name in player_names2:
-            if player2 in name.text:
-                found2 = True
-                break
-            y += 1
+            url6 = requests.get(f"https://www.cbssports.com/fantasy/football/stats/{position2}/2024/season/stats/ppr/")
+            doc6 = BeautifulSoup(url6.text, "html.parser")
+            player_names2 = doc6.findAll("span", attrs="CellPlayerName--long")
 
-        if found1:
-            rank1 = position1 + str(x+1)
-        else:
-            rank1 = position1 + '--'
-        if found2:
-            rank2 = position2 + str(y+1)
-        else:
-            rank2 = position2 + '--'
+            # loop through htmls and find index of players (get their ranking at their position)
+            x = 0
+            found1 = False
+            for name in player_names1:
+                if player1 in name.text:
+                    found1 = True
+                    break
+                x += 1
 
-        # unpack tuple with game info
-        home1, away1, time1, date1, week1, trash1 = info1[0]
-        home2, away2, time2, date2, week2, trash2 = info2[0]
-        if not boom1:
-            boom1 = '—'
-        if not bust1:
-            bust1 = '—'
-        if not boom2:
-            boom2 = '—'
-        if not bust2:
-            bust2 = '—'
+            y = 0
+            found2 = False
+            for name in player_names2:
+                if player2 in name.text:
+                    found2 = True
+                    break
+                y += 1
 
-        # display information to user in an embed
-        compare_embed = discord.Embed(title=f"{formatted_week} Player Comparison", color=discord.Color.orange())
-        compare_embed.set_author(name="Fantasy Football Bot", icon_url="https://seeklogo.com/images/N/nfl-logo-B2C95E8E88-seeklogo.com.png")
-        compare_embed.add_field(name=f"**{player1}**", value="", inline=True)
-        compare_embed.add_field(name=f"{position1.upper()} • {team1}", value='', inline=True)
-        compare_embed.add_field(name="Game Info", value=f"{away1} @ {home1} \n{date1} at {time1}", inline=False)
-        compare_embed.add_field(name="Projected Points", value=projection1, inline=True)
-        compare_embed.add_field(name="Current Rank", value=rank1, inline=True)
-        compare_embed.add_field(name='', value='', inline=False)
-        compare_embed.add_field(name="Boom Chance", value=boom1, inline=True)
-        compare_embed.add_field(name="Bust Chance", value=bust1, inline=True)
-        compare_embed.add_field(name="", value="----------------------------------", inline=False)
-        compare_embed.add_field(name=f"**{player2}**", value='', inline=True)
-        compare_embed.add_field(name=f"{position2.upper()} • {team2}", value='', inline=True)
-        compare_embed.add_field(name="Game Info", value=f"{away2} @ {home2} \n{date2} at {time2}", inline=False)
-        compare_embed.add_field(name="Projected Points", value=projection2, inline=True)
-        compare_embed.add_field(name="Current Rank", value=rank2, inline=True)
-        compare_embed.add_field(name="", value="", inline=False)
-        compare_embed.add_field(name="Boom Chance", value=boom2, inline=True)
-        compare_embed.add_field(name="Bust Chance", value=bust2, inline=True)
-        compare_embed.add_field(name='', value='', inline=False)
-        compare_embed.timestamp = datetime.now()
-        compare_embed.set_footer(text='Start or Sit')
+            # get position ranks using indices x and y from previous for loop
+            if found1:
+                rank1 = position1 + str(x+1)
+            else:
+                rank1 = position1 + '--'
+            if found2:
+                rank2 = position2 + str(y+1)
+            else:
+                rank2 = position2 + '--'
 
-        await interaction.followup.edit_message(initial_message.id, content=None, embed=compare_embed)
+            # unpack tuple with game info
+            home1, away1, time1, date1, week1, trash1 = info1[0]
+            home2, away2, time2, date2, week2, trash2 = info2[0]
+            if not boom1:
+                boom1 = '—'
+            if not bust1:
+                bust1 = '—'
+            if not boom2:
+                boom2 = '—'
+            if not bust2:
+                bust2 = '—'
 
-# adds autocompletion for the players in the start_or_sit command
+            # display information to user in an embed
+            compare_embed = discord.Embed(title=f"{formatted_week} Player Comparison", color=discord.Color.orange())
+            compare_embed.set_author(name="Fantasy Football Bot", icon_url="https://seeklogo.com/images/N/nfl-logo-B2C95E8E88-seeklogo.com.png")
+            compare_embed.add_field(name=f"**{player1}**", value="", inline=True)
+            compare_embed.add_field(name=f"{position1.upper()} • {team1}", value='', inline=True)
+            compare_embed.add_field(name="Game Info", value=f"{away1} @ {home1} \n{date1} at {time1}", inline=False)
+            compare_embed.add_field(name="Projected Points", value=projection1, inline=True)
+            compare_embed.add_field(name="Current Rank", value=rank1, inline=True)
+            compare_embed.add_field(name='', value='', inline=False)
+            compare_embed.add_field(name="Boom Chance", value=boom1, inline=True)
+            compare_embed.add_field(name="Bust Chance", value=bust1, inline=True)
+            compare_embed.add_field(name="", value="----------------------------------", inline=False)
+            compare_embed.add_field(name=f"**{player2}**", value='', inline=True)
+            compare_embed.add_field(name=f"{position2.upper()} • {team2}", value='', inline=True)
+            compare_embed.add_field(name="Game Info", value=f"{away2} @ {home2} \n{date2} at {time2}", inline=False)
+            compare_embed.add_field(name="Projected Points", value=projection2, inline=True)
+            compare_embed.add_field(name="Current Rank", value=rank2, inline=True)
+            compare_embed.add_field(name="", value="", inline=False)
+            compare_embed.add_field(name="Boom Chance", value=boom2, inline=True)
+            compare_embed.add_field(name="Bust Chance", value=bust2, inline=True)
+            compare_embed.add_field(name='', value='', inline=False)
+            compare_embed.timestamp = datetime.now()
+            compare_embed.set_footer(text='Start or Sit')
+
+            await interaction.followup.send(content=None, embed=compare_embed, ephemeral=True)
+
+    except Exception as e:
+        await interaction.followup.send(f"An error occurred: {str(e)}", ephemeral=True)
+
+# adds autocompletion for the start_or_sit command
 @start_or_sit.autocomplete('player1')
 async def start_or_sit_player1_autocomplete(interaction: discord.Interaction, current: str) -> list[discord.app_commands.Choice[str]]:
     return await player_autocomplete(interaction, current)
@@ -1044,7 +1075,6 @@ async def start_or_sit_player1_autocomplete(interaction: discord.Interaction, cu
 async def start_or_sit_player2_autocomplete(interaction: discord.Interaction, current: str) -> list[discord.app_commands.Choice[str]]:
     return await player_autocomplete(interaction, current)
 
-# adds autocompletion for the week in the start_or_sit command
 @start_or_sit.autocomplete('week')
 async def start_or_sit_week_autocomplete(interaction: discord.Interaction, current: str) -> list[discord.app_commands.Choice[str]]:
     weeks = [f"{i}" for i in range(1, 18)]
@@ -1068,164 +1098,172 @@ async def start_or_sit_week_autocomplete(interaction: discord.Interaction, curre
 @app_commands.describe(receiving4='Enter a player you are trading for')
 @app_commands.describe(receiving5='Enter a player you are trading for')
 async def trade_analyzer(interaction: discord.Interaction, giving1: str = None, giving2: str = None, giving3: str = None, giving4: str = None, giving5: str = None, receiving1: str = None, receiving2: str = None, receiving3: str = None, receiving4: str = None, receiving5: str = None):
-    await interaction.response.send_message("Gathering information, please wait...", ephemeral=True)
-    initial_message = await interaction.original_response()
+    await interaction.response.defer(thinking=True, ephemeral=True)
 
-    # store user input in a list
-    giving_player = []
-    receiving_player = []
-    giving_count = 0
-    receiving_count = 0
+    try:
+        # store user input in a list
+        giving_player = []
+        receiving_player = []
+        giving_count = 0
+        receiving_count = 0
 
-    if giving1:
-        giving_count += 1
-        giving_player.append(giving1)
-    if giving2:
-        giving_count += 1
-        giving_player.append(giving2)
-    if giving3:
-        giving_count += 1
-        giving_player.append(giving3)
-    if giving4:
-        giving_count += 1
-        giving_player.append(giving4)
-    if giving5:
-        giving_count += 1
-        giving_player.append(giving5)
+        if giving1:
+            giving_count += 1
+            giving_player.append(giving1)
+        if giving2:
+            giving_count += 1
+            giving_player.append(giving2)
+        if giving3:
+            giving_count += 1
+            giving_player.append(giving3)
+        if giving4:
+            giving_count += 1
+            giving_player.append(giving4)
+        if giving5:
+            giving_count += 1
+            giving_player.append(giving5)
 
-    if receiving1:
-        receiving_count += 1
-        receiving_player.append(receiving1)
-    if receiving2:
-        receiving_count += 1
-        receiving_player.append(receiving2)
-    if receiving3:
-        receiving_count += 1
-        receiving_player.append(receiving3)
-    if receiving4:
-        receiving_count += 1
-        receiving_player.append(receiving4)
-    if receiving5:
-        receiving_count += 1
-        receiving_player.append(receiving5)
+        if receiving1:
+            receiving_count += 1
+            receiving_player.append(receiving1)
+        if receiving2:
+            receiving_count += 1
+            receiving_player.append(receiving2)
+        if receiving3:
+            receiving_count += 1
+            receiving_player.append(receiving3)
+        if receiving4:
+            receiving_count += 1
+            receiving_player.append(receiving4)
+        if receiving5:
+            receiving_count += 1
+            receiving_player.append(receiving5)
 
-    if len(giving_player) == 0 or len(receiving_player) == 0:
-        await interaction.followup.edit_message(initial_message.id, content=f"Please enter at least one player that you are trading away (giving) as well as trading for (recieving)")
-        return
-    # get ranking (just need position) from database of players
-    giving_pos = []
-    receiving_pos = []
-
-    for i in range(0, len(giving_player)):
-        with sqlite3.connect('draft_board.db') as storage:
-            cursor = storage.cursor()
-            query = "SELECT ranking FROM last_year_stats WHERE player=?"
-            cursor.execute(query, (giving_player[i],))
-            temp = cursor.fetchall()
-            if temp:
-                temp = temp[0][0][:2]
-                giving_pos.append(temp)
-            else:
-                await interaction.followup.edit_message(initial_message.id, content=f"We couldn't find {giving_player[i]} in our database. Try selecting a player from the drop down menu.")
-                return
-
-    for i in range(0, len(receiving_player)):
-        with sqlite3.connect('draft_board.db') as storage:
-            cursor = storage.cursor()
-            query = "SELECT ranking FROM last_year_stats WHERE player=?"
-            cursor.execute(query, (receiving_player[i],))
-            temp = cursor.fetchall()
-            if temp:
-                temp = temp[0][0][:2]
-                receiving_pos.append(temp)
-            else:
-                await interaction.followup.edit_message(initial_message.id, content=f"We couldn't find {receiving_player[i]} in our database. Try selecting a player from the drop down menu.")
-                return
-
-    giving_score = []
-    giving_team = []
-    giving_rank = []
-    receiving_score = []
-    receiving_team = []
-    receiving_rank = []
-
-    for i in range(0, len(giving_player)):
-        giving_score.append(await calculate_trade_value(giving_player[i], giving_pos[i], giving_team, giving_rank))
-        if giving_score[i] == -1:
-            await interaction.followup.edit_message(initial_message.id, content=f"Unfortunately we couldn't find {giving_player[i]} in our database.")
+        if len(giving_player) == 0 or len(receiving_player) == 0:
+            await interaction.followup.send(content=f"Please enter at least one player that you are trading away (giving) as well as trading for (recieving)", ephemeral=True)
             return
 
-    for i in range(0, len(receiving_player)):
-        receiving_score.append(await calculate_trade_value(receiving_player[i], receiving_pos[i], receiving_team, receiving_rank))
-        if receiving_score[i] == -1:
-            await interaction.followup.edit_message(initial_message.id, content=f"Unfortunately we couldn't find {receiving_player[i]} in our database.")
-            return
+        # get ranking (just need position) from database of players
+        giving_pos = []
+        receiving_pos = []
 
-    giving_score_string = ''
-    receiving_score_string = ''
-    giving_player_string = ''
-    receiving_player_string = ''
-    giving_rank_string = ''
-    receiving_rank_string = ''
-    giving_sum = 0.0
-    receiving_sum = 0.0
+        for i in range(0, len(giving_player)):
+            with sqlite3.connect('draft_board.db') as storage:
+                cursor = storage.cursor()
+                query = "SELECT ranking FROM last_year_stats WHERE player=?"
+                cursor.execute(query, (giving_player[i],))
+                temp = cursor.fetchall()
+                if temp:
+                    temp = temp[0][0][:2]
+                    giving_pos.append(temp)
+                else:
+                    await interaction.followup.send(content=f"We couldn't find {giving_player[i]} in our database. Try selecting a player from the drop down menu.", ephemeral=True)
+                    return
 
-    for i in range(0, len(giving_score)):
-        temp = giving_score[i]
-        giving_sum += giving_score[i]
-        giving_player_string += f"{giving_player[i]}  ({giving_team[i]})\n"
-        giving_score_string += f"{temp:.2f} \n"
-        giving_rank_string += giving_rank[i] + '\n'
+        for i in range(0, len(receiving_player)):
+            with sqlite3.connect('draft_board.db') as storage:
+                cursor = storage.cursor()
+                query = "SELECT ranking FROM last_year_stats WHERE player=?"
+                cursor.execute(query, (receiving_player[i],))
+                temp = cursor.fetchall()
+                if temp:
+                    temp = temp[0][0][:2]
+                    receiving_pos.append(temp)
+                else:
+                    await interaction.followup.send(content=f"We couldn't find {receiving_player[i]} in our database. Try selecting a player from the drop down menu.", ephemeral=True)
+                    return
 
-    if len(giving_player) > 1:
-        giving_score_string += f"**{giving_sum:.2f}**"
+        giving_score = []
+        giving_team = []
+        giving_rank = []
+        receiving_score = []
+        receiving_team = []
+        receiving_rank = []
 
-    for i in range(0, len(receiving_score)):
-        temp = receiving_score[i]
-        receiving_sum += receiving_score[i]
-        receiving_player_string += f"{receiving_player[i]}  ({receiving_team[i]})\n"
-        receiving_score_string += f"{temp:.2f} \n"
-        receiving_rank_string += receiving_rank[i] + '\n'
+        # get calculated trade value
+        for i in range(0, len(giving_player)):
+            giving_score.append(await calculate_trade_value(giving_player[i], giving_pos[i], giving_team, giving_rank))
+            if giving_score[i] == -1:
+                await interaction.followup.send(content=f"Unfortunately we couldn't find {giving_player[i]} in our database.", ephemeral=True)
+                return
 
-    if len(receiving_player) > 1:
-        receiving_score_string += f"**{receiving_sum:.2f}**"
+        for i in range(0, len(receiving_player)):
+            receiving_score.append(await calculate_trade_value(receiving_player[i], receiving_pos[i], receiving_team, receiving_rank))
+            if receiving_score[i] == -1:
+                await interaction.followup.send(content=f"Unfortunately we couldn't find {receiving_player[i]} in our database.", ephemeral=True)
+                return
 
-    difference = giving_sum - receiving_sum
-    outcome = ''
+        giving_score_string = ''
+        receiving_score_string = ''
+        giving_player_string = ''
+        receiving_player_string = ''
+        giving_rank_string = ''
+        receiving_rank_string = ''
+        giving_sum = 0.0
+        receiving_sum = 0.0
 
-    if difference > 3:
-        if difference < 7.5:
-            outcome = "It's close, but the trade doesn't favor your team"
+        # format data
+        for i in range(0, len(giving_score)):
+            temp = giving_score[i]
+            giving_sum += giving_score[i]
+            giving_player_string += f"{giving_player[i]}  ({giving_team[i]})\n"
+            giving_score_string += f"{temp:.2f} \n"
+            giving_rank_string += giving_rank[i] + '\n'
+
+        if len(giving_player) > 1:
+            giving_score_string += f"**{giving_sum:.2f}**"
+
+        for i in range(0, len(receiving_score)):
+            temp = receiving_score[i]
+            receiving_sum += receiving_score[i]
+            receiving_player_string += f"{receiving_player[i]}  ({receiving_team[i]})\n"
+            receiving_score_string += f"{temp:.2f} \n"
+            receiving_rank_string += receiving_rank[i] + '\n'
+
+        if len(receiving_player) > 1:
+            receiving_score_string += f"**{receiving_sum:.2f}**"
+
+        # determine which side of the trade has more value and what the user should do
+        difference = giving_sum - receiving_sum
+        outcome = ''
+
+        if difference > 3:
+            if difference < 7.5:
+                outcome = "It's close, but the trade doesn't favor your team"
+            else:
+                outcome = "We wouldn't recommend this trade"
+        elif difference < -3:
+            if difference > -7.5:
+                outcome = "The trade favors your team, but not by a lot"
+            else:
+                outcome = "Great trade, we think you should do it"
         else:
-            outcome = "We wouldn't recommend this trade"
-    elif difference < -3:
-        if difference > -7.5:
-            outcome = "The trade favors your team, but not by a lot"
-        else:
-            outcome = "Great trade, we think you should do it"
-    else:
-        outcome = "This one's a toss up, go with team needs"
+            outcome = "This one's a toss up, go with team needs"
 
-    multi = int(1.2 * len(outcome))
-    linebreak = multi * '-'
+        linebreak = '------------------------------------------------------------'
 
-    # display information to user in an embed
-    trade_embed = discord.Embed(title=outcome, color=discord.Color.brand_red())
-    trade_embed.set_author(name="Fantasy Football Bot", icon_url="https://seeklogo.com/images/N/nfl-logo-B2C95E8E88-seeklogo.com.png")
-    trade_embed.add_field(name='', value='', inline=False)
-    trade_embed.add_field(name=f"Trading Away", value=giving_player_string, inline=True)
-    trade_embed.add_field(name="ROS Ranking", value=giving_rank_string, inline=True)
-    trade_embed.add_field(name=f"Trade Value", value=giving_score_string, inline=True)
-    trade_embed.add_field(name='', value=linebreak, inline=False)
-    trade_embed.add_field(name=f"Trading For", value=receiving_player_string, inline=True)
-    trade_embed.add_field(name="ROS Ranking", value=receiving_rank_string, inline=True)
-    trade_embed.add_field(name=f"Trade Value", value=receiving_score_string, inline=True)
-    trade_embed.add_field(name="", value="", inline=False)
-    trade_embed.timestamp = datetime.now()
-    trade_embed.set_footer(text='Trade Analyzer')
-    await interaction.followup.edit_message(initial_message.id, content=None, embed=trade_embed)
+        # display information to user in an embed
+        trade_embed = discord.Embed(title=outcome, color=discord.Color.brand_red())
+        trade_embed.set_author(name="Fantasy Football Bot", icon_url="https://seeklogo.com/images/N/nfl-logo-B2C95E8E88-seeklogo.com.png")
+        trade_embed.add_field(name='', value='', inline=False)
+        trade_embed.add_field(name=f"Trading Away", value=giving_player_string, inline=True)
+        trade_embed.add_field(name="ROS Ranking", value=giving_rank_string, inline=True)
+        trade_embed.add_field(name=f"Trade Value", value=giving_score_string, inline=True)
+        trade_embed.add_field(name='', value=linebreak, inline=False)
+        trade_embed.add_field(name=f"Trading For", value=receiving_player_string, inline=True)
+        trade_embed.add_field(name="ROS Ranking", value=receiving_rank_string, inline=True)
+        trade_embed.add_field(name=f"Trade Value", value=receiving_score_string, inline=True)
+        trade_embed.add_field(name="", value="", inline=False)
+        trade_embed.timestamp = datetime.now()
+        trade_embed.set_footer(text='Trade Analyzer')
+        await interaction.followup.send(content=None, embed=trade_embed, ephemeral=True)
+
+    except Exception as e:
+        await interaction.followup.send(f"An error occurred: {str(e)}", ephemeral=True)
 
 async def calculate_trade_value(player1, position, team1, rank1):
+
+    # get rest of year (remaining) projections for players from internet
     url = requests.get("https://www.numberfire.com/nfl/fantasy/remaining-projections")
     doc = BeautifulSoup(url.text, "html.parser")
     player_name = doc.findAll("span", attrs="full")
@@ -1244,7 +1282,7 @@ async def calculate_trade_value(player1, position, team1, rank1):
     if position == 'WR' or position == 'RB':
         posRange = 24
 
-    # hotfix for issue inconsistency in database
+    # fix for inconsistency in database
     if player1 == 'Michael Pittman':
         player1 = 'Michael Pittman Jr.'
 
@@ -1262,8 +1300,10 @@ async def calculate_trade_value(player1, position, team1, rank1):
             j += 1
         i += 1
 
+    # get position rank
     rank1.append(position + str(posRank))
 
+    # format string
     if index != -1:
         start_idx = positions[index].text.rfind('(')
         end_idx = positions[index].text.rfind(')')
@@ -1295,10 +1335,13 @@ async def calculate_trade_value(player1, position, team1, rank1):
     else:
         offset += ((proj - posAvg) * 0.8) + (((posRange / 2) - posRank) * 2)
 
+    # turn value into a more readable number
     value = (proj + float(recs) + offset) / 15
 
+    # adjust for qbs getting more points than other positions despite being less valuable
     if position == 'QB':
         value = value * 0.75
+    # lowest score a player can have is 1
     if value < 1:
         value = 1.00
     if value:
@@ -1323,57 +1366,162 @@ async def trade_analyzer_autocomplete(interaction: discord.Interaction, current:
 
 @bot.tree.command(name='breaking_news', description='View recent fantasy football relevant news in the NFL.')
 async def breaking_news(interaction: discord.Interaction):
-    await interaction.response.send_message("Gathering information, please wait...", ephemeral=True)
-    initial_message = await interaction.original_response()
+    await interaction.response.defer(thinking=True, ephemeral=True)
 
-    url = requests.get("https://www.fantasypros.com/nfl/breaking-news.php")
-    doc = BeautifulSoup(url.text, "html.parser")
-    news = doc.findAll("div", attrs='player-news-header')
+    try:
+        # get news from internet
+        url = requests.get("https://www.fantasypros.com/nfl/breaking-news.php")
+        doc = BeautifulSoup(url.text, "html.parser")
+        news = doc.findAll("div", attrs='player-news-header')
 
-    i = 0
-    headers = []
-    info = []
-    for x in news:
-        if i == 7:
-            break
-        headers.append(x.text.strip())
-        i += 1
+        # store first 6 news articles
+        i = 0
+        headers = []
+        info = []
+        for x in news:
+            if i == 7:
+                break
+            headers.append(x.text.strip())
+            i += 1
 
-    j = 0
-    for header in headers:
-        desc = news[j].parent.text.strip()
-        if "Fantasy Impact" in desc:
-            temp = desc.split("Fantasy Impact: ")
-            info.append(temp[1])
+        # format string into two parts, headers and fantasy impact (descriptions)
+        j = 0
+        for header in headers:
+            desc = news[j].parent.text.strip()
+            if "Fantasy Impact" in desc:
+                temp = desc.split("Fantasy Impact: ")
+                info.append(temp[1])
 
-        match = re.search(r'(Mon|Tue|Wed|Thu|Fri|Sat|Sun), [A-Za-z]{3} \d{1,2}(st|nd|rd|th) \d{1,2}:\d{2}[ap]m', header)
-        if match:
-            date_part = match.group(0)
-            headers[j] = header.replace(date_part, f"\n{date_part}")
-        else:
-            print("date could not be formatted")
-        j += 1
+            # get date on a new line
+            match = re.search(r'(Mon|Tue|Wed|Thu|Fri|Sat|Sun), [A-Za-z]{3} \d{1,2}(st|nd|rd|th) \d{1,2}:\d{2}[ap]m', header)
+            if match:
+                date_part = match.group(0)
+                headers[j] = header.replace(date_part, f"\n{date_part}")
+            else:
+                print("date could not be formatted")
+            j += 1
 
-    if len(headers) != 7:
-        await interaction.followup.edit_message(initial_message.id, content="There was an issue retrieving the news")
-        print(len(headers))
-        return
+        if len(headers) != 7:
+            await interaction.followup.send(content="There was an issue retrieving the news", ephemeral=True)
+            print(len(headers))
+            return
 
-    news_embed = discord.Embed(
-        title="Fantasy Football News",
-        description="[All News](https://www.fantasypros.com/nfl/breaking-news.php)",
-        color=discord.Color.dark_magenta())
-    news_embed.set_author(name="Fantasy Football Bot", icon_url="https://seeklogo.com/images/N/nfl-logo-B2C95E8E88-seeklogo.com.png")
-    news_embed.add_field(name=headers[0], value=info[0], inline=False)
-    news_embed.add_field(name=headers[1], value=info[1], inline=False)
-    news_embed.add_field(name=headers[2], value=info[2], inline=False)
-    news_embed.add_field(name=headers[3], value=info[3], inline=False)
-    news_embed.add_field(name=headers[4], value=info[4], inline=False)
-    news_embed.add_field(name=headers[5], value=info[5], inline=False)
-    news_embed.add_field(name=headers[6], value=info[6], inline=False)
-    news_embed.timestamp = datetime.now()
-    news_embed.set_footer(text='Breaking News')
-    await interaction.followup.edit_message(initial_message.id, content=None, embed=news_embed)
+        # display news in an embed
+        news_embed = discord.Embed(
+            title="Fantasy Football News",
+            description="[More News](https://www.fantasypros.com/nfl/breaking-news.php)",
+            color=discord.Color.dark_magenta())
+        news_embed.set_author(name="Fantasy Football Bot", icon_url="https://seeklogo.com/images/N/nfl-logo-B2C95E8E88-seeklogo.com.png")
+        news_embed.add_field(name=headers[0], value=info[0], inline=False)
+        news_embed.add_field(name=headers[1], value=info[1], inline=False)
+        news_embed.add_field(name=headers[2], value=info[2], inline=False)
+        news_embed.add_field(name=headers[3], value=info[3], inline=False)
+        news_embed.add_field(name=headers[4], value=info[4], inline=False)
+        news_embed.add_field(name=headers[5], value=info[5], inline=False)
+        news_embed.add_field(name=headers[6], value=info[6], inline=False)
+        news_embed.timestamp = datetime.now()
+        news_embed.set_footer(text='Breaking News')
+        await interaction.followup.send(content=None, embed=news_embed, ephemeral=True)
+
+    except Exception as e:
+        await interaction.followup.send(f"An error occurred: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="waiver_wire_report", description="View players that are trending up in other fantasy football leagues.")
+async def waiver_wire_report(interaction: discord.Interaction):
+    await interaction.response.defer(thinking=True, ephemeral=True)
+
+    try:
+        # get player trends data from internet
+        url = requests.get("https://fantasy.nfl.com/research/trends")
+        doc = BeautifulSoup(url.text, "html.parser")
+        trends = doc.findAll("td")
+
+        playerStr = []
+        rosterPercent = []
+        startPercent = []
+
+        i = 0
+        j = 2
+        k = 4
+
+        # use offsets to get data into lists
+        for trend in trends:
+            if i > 40:
+                break
+            else:
+                playerStr.append(trends[i].text)
+                rosterPercent.append(trends[j].text)
+                startPercent.append(trends[k].text)
+
+                i += 8
+                j += 8
+                k += 8
+
+        dash_index = -1
+        names = []
+        player_info = []
+
+        # split data so player name and team/position are in separate strings
+        for player in playerStr:
+            split_index = -1
+            x = 0
+            for letter in player:
+                if letter == '-':
+                    dash_index = x
+                    split_index = dash_index - 3
+                    names.append(player[:split_index - 1])
+                    player_info.append(player[split_index:].replace(' - ', ' • '))
+                else:
+                    x += 1
+
+        # unpack list into variables
+        name1, name2, name3, name4, name5, name6 = names
+        info1, info2, info3, info4, info5, info6 = player_info
+        rosterPer1, rosterPer2, rosterPer3, rosterPer4, rosterPer5, rosterPer6 = rosterPercent
+        startPer1, startPer2, startPer3, startPer4, startPer5, startPer6 = startPercent
+
+        # display data in an embed
+        trends_embed = discord.Embed(
+            title="Players Trending Up",
+            description="[See All Trends](https://fantasy.nfl.com/research/trends)",
+            color=discord.Color.gold())
+        trends_embed.set_author(name="Fantasy Football Bot",
+                              icon_url="https://seeklogo.com/images/N/nfl-logo-B2C95E8E88-seeklogo.com.png")
+        trends_embed.add_field(name=f"{name1} \t {info1}", value="", inline=False)
+        trends_embed.add_field(name='Rostered %', value=rosterPer1, inline = True)
+        trends_embed.add_field(name='Starting %', value=startPer1, inline=True)
+        trends_embed.add_field(name='', value='--------------------------------', inline=False)
+
+        trends_embed.add_field(name=f"{name2} \t {info2}", value="", inline=False)
+        trends_embed.add_field(name='Rostered %', value=rosterPer2, inline=True)
+        trends_embed.add_field(name='Starting %', value=startPer2, inline=True)
+        trends_embed.add_field(name='', value='--------------------------------', inline=False)
+
+        trends_embed.add_field(name=f"{name3} \t {info3}", value="", inline=False)
+        trends_embed.add_field(name='Rostered %', value=rosterPer3, inline=True)
+        trends_embed.add_field(name='Starting %', value=startPer3, inline=True)
+        trends_embed.add_field(name='', value='--------------------------------', inline=False)
+
+        trends_embed.add_field(name=f"{name4} \t {info4}", value="", inline=False)
+        trends_embed.add_field(name='Rostered %', value=rosterPer4, inline=True)
+        trends_embed.add_field(name='Starting %', value=startPer4, inline=True)
+        trends_embed.add_field(name='', value='--------------------------------', inline=False)
+
+        trends_embed.add_field(name=f"{name5} \t {info5}", value="", inline=False)
+        trends_embed.add_field(name='Rostered %', value=rosterPer5, inline=True)
+        trends_embed.add_field(name='Starting %', value=startPer5, inline=True)
+        trends_embed.add_field(name='', value='--------------------------------', inline=False)
+
+        trends_embed.add_field(name=f"{name6} \t {info6}", value="", inline=False)
+        trends_embed.add_field(name='Rostered %', value=rosterPer6, inline=True)
+        trends_embed.add_field(name='Starting %', value=startPer6, inline=True)
+
+        trends_embed.timestamp = datetime.now()
+        trends_embed.set_footer(text='Waiver Wire Report')
+        await interaction.followup.send(content=None, embed=trends_embed, ephemeral=True)
+
+    except Exception as e:
+        await interaction.followup.send(f"An error occurred: {str(e)}", ephemeral=True)
 
 # closes the connection when the bot shuts down
 @bot.event
