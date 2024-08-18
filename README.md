@@ -1,7 +1,39 @@
 # Fantasy Football Discord Bot
 ## About this project
-1. 
-## Using the Bot through it's dedicated server
+The Fantasy Football Discord Bot was created to help fantasy football players plan, manage, and improve their teams with commands that allow the user to create their own draft board rankings, view players' stats from the current or previous season, get an in depth analysis on potential trades, get reccomendations on who to start and who to keep on their bench on a week by week basis, see up to date news, and more! This Discord.py bot uses information from a sqlite database, webscraping, and its own calculations and analysis to turn hours worth of football research into the ease of a few button clicks. The project is hosted on a dedicated server that is always running so using the application is as simple as inviting it to a discord server and allowing permissions.
+## Getting started
+### Using the application through its dedicated server
 1. Create or choose an already created discord server to invite the Fantasy Football Discord Bot to.
-2. Post the invite link (https://discord.com/oauth2/authorize?client_id=1266541364657786900&permissions=8&integration_type=0&scope=bot+applications.commands) in any text channel of the discord server and click the link to initiate the process. Follow the on screen prompts and allow the Fantasy Football Bot the required permissions.
-3. The Fantasy Football Bot is now setup, type a '/' in any text channel and click the Fantasy Football Bot's icon (white background brown football) to view all commands and enjoy!
+2. Click the invite link (or alternatively post it in a discord channel of the server you want to invite it to) https://discord.com/oauth2/authorize?client_id=1266541364657786900&permissions=8&integration_type=0&scope=bot+applications.commands and log into your discord account. Select the server you want to invite the Fantasy Football Bot to and press continue. Allow the required permissions for the bot and authorize access.
+3. Congratulations, the Fantasy Football Bot is now setup in your server and can be used at any time! Type '/' in any text channel and click the Fantasy Football Bot's icon (white background brown football) to view all commands
+
+### Hosting the application locally
+### Python Version
+Python 3.12
+
+#### Installing required packages
+pip install -r /path/to/your/requirements.txt
+
+#### Creating the application through Discord's Developer Portal
+1. Click the link https://discord.com/developers/applications
+2. At the top right click 'New Application' and name it as you please
+3. On the left under settings select 'Bot'. Ensure public bot is enabled. Copy the token (reset token if there is no copy option) and save it somewhere safe. This token should not be shared with anyone as it is essentially the password to your bot.
+4. Navigate to 'OAuth2' under settings. Under 'Scopes' tick the boxes for applications.commands and bot. On the same screen under 'Bot Permissions' tick the box for Administrator. Copy the 'Generated URL' and save it somewhere. This is the link people will use to invite your bot to their server.
+
+#### Creating Necessary Files
+1. In the directory for this project, create a new file and name it '.env'
+2. Inside of this file paste this line "DISCORD_TOKEN=YOUR_DISCORD_TOKEN" and replace 'YOUR_DISCORD_TOKEN' with the token copied from earlier.
+3. Run get_lastyear.py and get_schedule.py  \
+   In your terminal type: \
+     ```python get_lastyear.py``` \
+   Followed by \
+    ```python get_schedule.py``` \
+
+#### Running the Bot
+1. Setup is complete now it's time to run the application!
+2. In your terminal type: \
+     ```python bot.py```
+
+
+
+
