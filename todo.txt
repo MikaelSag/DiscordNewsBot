@@ -14,9 +14,9 @@
 - add rookies to player database DONE
 - fix schedule DONE
 - fantasy stats from last season DONE
-- injuries/news?
+- injuries/news? DONE
 - start/sit command (use betting odds rather than projected points)? DONE - used projected points because betting odds change too often and arent published early enough
-- waiver wire report?
+- waiver wire report? DONE
 - trade analyzer DONE
 - add more stats for last_season_stats DONE
 - add boom or bust in start_or_sit DONE

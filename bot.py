@@ -13,7 +13,6 @@ from dotenv import load_dotenv
 # load environment variables
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
-GUILD_ID = int(os.getenv('DISCORD_GUILD_ID'))
 
 # initialize the bot with required intents
 intents = discord.Intents.default()
@@ -77,12 +76,8 @@ async def check_exists(discord_id):
 @bot.event
 async def on_ready():
     await load_starting()
-    for guild in bot.guilds:
-        if guild.id == GUILD_ID:
-            break
-
-    print(f'{bot.user} is connected to {guild.name}')
     synced = await bot.tree.sync()
+    print("Fantasy Football Bot is Online!")
     print(f"Synced {len(synced)} command(s)")
 
 # class for creating the draft board
@@ -577,10 +572,16 @@ async def last_season_stats(interaction: discord.Interaction, player: str):
             doc = BeautifulSoup(url.text, "html.parser")
             player_names = doc.findAll("span", attrs="CellPlayerName--long")
 
+            playerStr = ''
             for name in player_names:
                 if player in name.text:
                     playerStr = name.text
                     break
+
+            if not playerStr:
+                await interaction.followup.send(f'There are no recorded stats for {player}. Check your spelling.', ephemeral=True)
+                return
+
             playerStr = playerStr.strip()
             team = playerStr[-3:].strip()
 
