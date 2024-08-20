@@ -1,12 +1,14 @@
 # Fantasy Football Discord Bot
 ## About this project
 The Fantasy Football Discord Bot was created to help fantasy football players plan, manage, and improve their teams with commands that allow the user to create their own draft board rankings, view players' stats from the current or previous season, get an in depth analysis on potential trades, get reccomendations on who to start and who to keep on their bench on a week by week basis, see up to date news, and more! This project was built using Python, SQL, Discord.py, and the Beautiful Soup python and uses information from a sqlite database, webscraping, and its own calculations and analysis to turn hours worth of football research into the ease of a few button clicks. The project is hosted on a dedicated server that is always running so using the application is as simple as inviting the bot to a discord server and allowing permissions.
-![Alt text](Screenshots/commands.png)
-![Alt text](Screenshots/managedraftboard.png)
-![Alt text](Screenshots/lastseason.png)
-![Alt text](Screenshots/start_sit.png)
-![Alt text](Screenshots/tradeanalyzer.png)
-![Alt text](Screenshots/breakingnews.png)
+<img width="1124" alt="commands" src="https://github.com/user-attachments/assets/5964dcea-692a-487b-98f7-a324691531d9">
+<img width="1119" alt="managedraftboard" src="https://github.com/user-attachments/assets/3bef37fc-06b2-49e3-be23-aa07470e0d48">
+<img width="1119" alt="lastseason" src="https://github.com/user-attachments/assets/4a56aec0-3a26-42f4-b9b9-441e0e592609">
+<img width="1128" alt="start_sit" src="https://github.com/user-attachments/assets/041ab612-1933-48c9-876a-8869627c1f9a">
+<img width="1126" alt="tradeanalyzer" src="https://github.com/user-attachments/assets/e7aabb92-08b7-4fed-90bc-7c6e92ce26eb">
+<img width="1125" alt="breakingnews" src="https://github.com/user-attachments/assets/10f7df0d-439d-4e55-a68c-dba89de4a8e8">
+
+
 ## Getting started
 ### Using the application through its dedicated server
 1. Create or choose an already created discord server to invite the Fantasy Football Discord Bot to.
