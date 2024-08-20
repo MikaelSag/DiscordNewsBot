@@ -57,11 +57,12 @@ async def load_starting():
 
 # load existing draftboard
 async def load_existing(discord_id):
-    user_id = str(discord_id)
-    cursor = storage.cursor()
-    query = "SELECT player FROM draft_board WHERE user_id=?"
-    cursor.execute(query, (user_id,))
-    old_players = cursor.fetchall()
+    with sqlite3.connect("draft_board.db") as storage:
+        user_id = str(discord_id)
+        cursor = storage.cursor()
+        query = "SELECT player FROM draft_board WHERE user_id=?"
+        cursor.execute(query, (user_id,))
+        old_players = cursor.fetchall()
     return old_players
 
 # check if user already has a custom draft board
